@@ -1,15 +1,15 @@
 import * as _ from 'lodash';
 const Crypto = require('crypto');
-import * as moment from "moment"
-import "moment-timezone"
-moment.tz.setDefault("Asia/Tokyo")
+import * as moment from "moment";
+import "moment-timezone";
+moment.tz.setDefault("Asia/Tokyo");
 
 export async function PromiseMap<T>(pmap: { [P in keyof T]: Promise<T[P]> }) {
-  const r: any = {}
+  const r: any = {};
   await Promise.all(Object.keys(pmap).map(key => (async () => {
-    r[key] = await pmap[key as (keyof T)]
-  })()))
-  return r as T
+    r[key] = await pmap[key as (keyof T)];
+  })()));
+  return r as T;
 }
 
 export function u_datify(data: any) {
@@ -28,11 +28,11 @@ export function u_datify(data: any) {
 
 function residual(digits: number[], radix: number, mod: number): number {
   let radixMod = 1; // これはキャッシュできる
-  return digits.map((d,i) => {
+  return digits.map((d, i) => {
     const s = d * radixMod % mod;
     radixMod = radixMod * radix % mod;
     return s;
-  }).reduce((s,x) => (s + x) % mod, 0) % mod;
+  }).reduce((s, x) => (s + x) % mod, 0) % mod;
 }
 
 function divide(digits: number[], radix: number, divisor: number) {

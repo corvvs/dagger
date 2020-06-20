@@ -3,8 +3,14 @@
   .panel
     v-btn(@click="edit_new_koto") new Koto
   .kotolist
+    .kotoschema
+      .time 作成
+      .short_text タイトル
+      .id ID
     .kotoitem(v-for="koto in docs" :key="koto.id")
-      | {{ koto.created_at }} {{ koto.title }} {{ koto.id }}
+      .time {{ timeout(koto.created_at, "YY/MM/DD hh:mm:ss") }}
+      .short_text(:title="koto.title") {{ koto.title }}
+      .id {{ koto.id }}
 
   v-dialog(v-model="show_new_koto" max-width=800)
     v-card.user
@@ -24,6 +30,7 @@
 
 <script lang="ts">
 import * as _ from "lodash";
+import moment from "moment";
 import { Prop, Component, Vue } from 'vue-property-decorator';
 import firebase from "firebase";
 import * as F from "@/models/koto"
@@ -37,6 +44,11 @@ extend('required', required);
   }
 })
 export default class Koto extends Vue {
+
+  // -- util --
+  timeout(epoch_ms: number, format: string) {
+    return moment(epoch_ms).format(format);
+  }
 
   // -- new Koto --
   show_new_koto = false;
@@ -56,7 +68,7 @@ export default class Koto extends Vue {
   // -- Kotos IO --
   lister!: F.FirestoreObjectLister<F.Koto>;
   unsubscriber!: () => void;
-  docs: F.Koto[] = []
+  docs: F.Koto[] = [];
   koto_working = false;
 
   // -- LifeCycle Hooks --
@@ -68,32 +80,32 @@ export default class Koto extends Vue {
     this.lister.option.saveStatusCallback = (status) => this.koto_working = status === "working";
     this.lister.option.snapshotCallback = (change) => {
       const { doc, object } = change;
-      console.log(`[!!] ${change.type} ${change.object.id}`)
+      // console.log(`[!!] ${change.type} ${change.object.id}`)
       switch (change.type) {
       case "added":
       case "modified":
         (() => {
-          const i = this.docs.findIndex(d => d.id === doc.id)
+          const i = this.docs.findIndex((d) => d.id === doc.id)
           if (0 <= i) {
             this.docs.splice(i, 1, object);
           } else {
             this.docs.splice(0, 0, object);
           }
         })()
-        break
+        break;
       case "removed":
         (() => {
-          const i = this.docs.findIndex(d => d.id === doc.id)
+          const i = this.docs.findIndex((d) => d.id === doc.id);
           if (0 <= i) {
-            this.docs.splice(i,1)
+            this.docs.splice(i, 1);
           }
-        })()
-        break
+        })();
+        break;
       }
     };
 
     // fetch
-    (await this.lister.fetch()).forEach(d => this.docs.push(d));
+    (await this.lister.fetch()).forEach((d) => this.docs.push(d));
     this.unsubscriber = this.lister.snapshot();
   }
 }
@@ -106,4 +118,30 @@ export default class Koto extends Vue {
   position relative;
   height 100%;
   background-color white;
+
+.kotolist
+  .kotoschema, .kotoitem
+    display flex
+    flex-direction row
+    align-items center
+
+    height 2em
+    > div
+      padding 4px
+    .time
+      width 8rem
+    .short_text
+      width 18rem
+  .kotoitem
+    &:hover
+      background-color lightgreen
+
+    .time
+      font-size smaller
+    .short_text
+      overflow hidden
+      text-overflow ellipsis
+      word-break keep-all
+      word-wrap none
+      white-space nowrap
 </style>

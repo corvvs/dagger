@@ -1,7 +1,7 @@
 import * as _ from "lodash";
 import firebase, { firestore, auth } from "firebase";
 import * as uuid from "uuid";
-import * as U from "@/util"
+import * as U from "@/util";
 
 type KotoStatus = "resolved";
 
@@ -27,7 +27,7 @@ export class FirestoreObjectLister<T extends {
    * 保存ステータス
    */
   get save_status() { return this._save_status; }
-  private _save_status: ListerStatus = "idling"
+  private _save_status: ListerStatus = "idling";
   private change_save_status(status: ListerStatus) {
     this._save_status = status;
     if (this.option.saveStatusCallback) { this.option.saveStatusCallback(this._save_status); }
