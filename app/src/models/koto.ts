@@ -14,6 +14,12 @@ export type Koto = {
   updated_at: number;
 };
 
+export type DeletedKoto = {
+  id: string;
+}
+
+type KotoError = Partial<Record<keyof Koto, string>>
+
 type ListerStatus = "idling" | "working";
 /**
  * Firebase collection I/O
@@ -64,6 +70,20 @@ export class FirestoreObjectLister<T extends {
     }
   }
 
+  /**
+   * 削除
+   */
+  async delete(object: T) {
+    this.change_save_status("working")
+    try {
+      const result = this.collection.doc(object.id).delete();
+      this.change_save_status("idling")
+      return result;
+    } catch (e) {
+      this.change_save_status("idling")
+      throw e;
+    }
+  }
 
   async fetch(limit = 100) {
     return (await this.collection.orderBy("created_at", "desc")
@@ -98,30 +118,6 @@ export namespace Koto {
     };
   }
 
-  export function test_flush_storage() {
-    sessionStorage.setItem(storageKey, "[[");
-  }
-
-  export function test_write(kotos: Koto[]) {
-    const t = Date.now();
-    kotos.forEach((f) => {
-      f.created_at = f.created_at || t;
-      f.updated_at = t;
-    })
-    sessionStorage.setItem(storageKey, JSON.stringify(kotos));
-  }
-
-  export function test_get(): Koto[] {
-    const string_data = sessionStorage.getItem(storageKey); 
-    try {
-      const data = string_data ? JSON.parse(string_data) : [];
-      return data;
-    } catch (e) {
-      console.error(e)
-      return [];
-    }
-  }
-
   // -- Firebase I/O --
   function koto_collection(uid: string) {
     return firebase.firestore().collection(`user/${uid}/koto`);
@@ -129,6 +125,32 @@ export namespace Koto {
 
   export function lister(uid: string)  {
     return new FirestoreObjectLister<Koto>(koto_collection(uid));
+  }
+
+  export function copy(object: Koto) {
+    return _.cloneDeep(object);
+  }
+
+  export function validate_creation(object: Koto): KotoError {
+    const e: KotoError = {};
+    if (!e.id) {
+      e.id = "入力してください。";
+    }
+    if (!(object.title || "").trim()) {
+      e.title = "入力してください。";
+    }
+    return e;
+  }
+
+  export function validate_update(object: Koto): KotoError {
+    const e: KotoError = {};
+    if (!e.id) {
+      e.id = "入力してください。";
+    }
+    if (!(object.title || "").trim()) {
+      e.title = "入力してください。";
+    }
+    return e;
   }
 }
 

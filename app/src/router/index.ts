@@ -1,7 +1,6 @@
 import Vue from 'vue';
 import VueRouter, { RouteConfig } from 'vue-router';
 import Koto from '../views/Koto.vue';
-
 Vue.use(VueRouter);
 
 const routes: RouteConfig[] = [
