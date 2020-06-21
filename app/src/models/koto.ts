@@ -131,26 +131,27 @@ export namespace Koto {
     return _.cloneDeep(object);
   }
 
-  export function validate_creation(object: Koto): KotoError {
+  export function validate_creation(object: Koto) {
     const e: KotoError = {};
-    if (!e.id) {
+    if (!object.id) {
       e.id = "入力してください。";
     }
     if (!(object.title || "").trim()) {
       e.title = "入力してください。";
     }
-    return e;
+    return Object.keys(e).length > 0 ? e : undefined;
   }
 
-  export function validate_update(object: Koto): KotoError {
+  export function validate_update(object?: Koto) {
+    if (!object) { return undefined; }
     const e: KotoError = {};
-    if (!e.id) {
+    if (!object.id) {
       e.id = "入力してください。";
     }
     if (!(object.title || "").trim()) {
       e.title = "入力してください。";
     }
-    return e;
+    return Object.keys(e).length > 0 ? e : undefined;
   }
 }
 

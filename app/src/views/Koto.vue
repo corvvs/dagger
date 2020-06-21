@@ -16,17 +16,26 @@
 
   v-dialog(v-model="show_new_koto" max-width=800)
     v-card.koto
-      ValidationObserver(ref="obs" v-slot="ObserverProps")
-        v-card-title 
-          h3 Koto
+      v-card-title 
+        h3 {{ newKoto.title  || '新しいKoto' }}
+        v-btn(large icon @click="new_mode = 'view'" :color="new_mode === 'view' ? 'orange' : ''")
+          v-icon visibility
+        v-btn(large icon @click="new_mode = 'edit'" :color="new_mode === 'edit' ? 'blue' : ''")
+          v-icon edit
+        v-chip(small :color="`${new_mode === 'view' ? 'orange' : 'blue'} white--text`") {{ new_mode === "view" ? "プレビュー" : "作成" }}
+
+      template(v-if="new_mode == 'view'")
+        v-card-text(style="text-align:left;" v-html="newKotoHTML")
+      template(v-if="new_mode == 'edit'")
         v-card-text(style="text-align:left;")
-          ValidationProvider(name="タイトル" rules="required" v-slot="{ errors }")
-            v-text-field(v-model="newKoto.title" type="text" label="タイトル" :error-messages="errors")
-          ValidationProvider(name="内容" rules="required" v-slot="{ errors }")
-            v-textarea(v-model="newKoto.body" label="内容" :error-messages="errors")
-        v-card-actions
-          v-btn(@click="show_new_koto = false") 閉じる
-          v-btn(@click="post_koto(newKoto)" :disabled="ObserverProps.invalid || !ObserverProps.validated" :loading="koto_working") 保存
+          v-text-field(v-model="newKoto.title" type="text" label="タイトル" :error-messages="newKotoError ? newKotoError.title : ''")
+          v-textarea(v-model="newKoto.body" label="内容" outlined)
+
+      v-card-text 
+        h5 ID: {{ newKoto.id }}
+      v-card-actions
+        v-btn(@click="show_new_koto = false") 閉じる
+        v-btn(@click="post_koto(newKoto)" :disabled="!!newKotoError" :loading="koto_working") 保存
 
 
 
@@ -43,14 +52,15 @@
 
       template(v-if="existing_mode == 'view'")
         v-card-text(style="text-align:left;" v-html="selectedKotoHTML")
-        v-card-text 
-          h5 {{ selectedKoto.id }}
       template(v-if="existing_mode == 'edit'")
         v-card-text(style="text-align:left;")
-          v-text-field(v-model="selectedKoto.title" type="text" label="タイトル" :error-messages="selectedKotoError.title")
+          v-text-field(v-model="selectedKoto.title" type="text" label="タイトル" :error-messages="selectedKotoError ? selectedKotoError.title : ''")
           v-textarea(v-model="selectedKoto.body" label="内容" outlined)
+
+      v-card-text 
+        h5 ID: {{ selectedKoto.id }}
       v-card-actions
-        v-btn(@click="show_existing_koto = false; existing_mode = 'view'") 閉じる
+        v-btn(@click="show_existing_koto = false") 閉じる
         v-btn(v-if="existing_mode == 'view'" @click="delete_koto(selectedKoto)" :disabled="false" :loading="koto_working" color="red white--text")
           v-icon delete
           | 削除
@@ -86,8 +96,9 @@ export default class Koto extends Vue {
   // -- new Koto --
   show_new_koto = false;
   newKoto: F.Koto = F.Koto.spawn();
-  koto_body_mode: "edit" | "preview" = "edit";
+  new_mode: "view" | "edit" = "edit";
   edit_new_koto() {
+    this.new_mode = "edit";
     this.show_new_koto = true;
   }
 
@@ -96,6 +107,10 @@ export default class Koto extends Vue {
     // option.gfm = true
     // option.breaks = true
     return Marked.parse(this.newKoto.body, option);
+  }
+
+  get newKotoError() {
+    return F.Koto.validate_update(this.newKoto);
   }
 
 
@@ -127,6 +142,7 @@ export default class Koto extends Vue {
   selectedKoto: F.Koto | null = null;
   view_koto(koto: F.Koto) {
     this.selectedKoto = F.Koto.copy(koto);
+    this.existing_mode = "view";
     this.show_existing_koto = true;
   }
 
@@ -139,9 +155,7 @@ export default class Koto extends Vue {
   }
 
   get selectedKotoError() {
-    if (!this.selectedKoto) { return undefined; }
-    const e = F.Koto.validate_update(this.selectedKoto);
-    return Object.keys(e).length > 0 ? e : undefined;
+    return F.Koto.validate_update(this.selectedKoto ? this.selectedKoto : undefined);
   }
 
   // -- Kotos IO --
