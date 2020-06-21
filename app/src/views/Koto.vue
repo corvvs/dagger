@@ -25,7 +25,8 @@
         v-chip(small :color="`${new_mode === 'view' ? 'orange' : 'blue'} white--text`") {{ new_mode === "view" ? "プレビュー" : "作成" }}
 
       template(v-if="new_mode == 'view'")
-        v-card-text(style="text-align:left;" v-html="newKotoHTML")
+        v-card-text(style="text-align:left;")
+          .kotopreview(v-html="newKotoHTML")
       template(v-if="new_mode == 'edit'")
         v-card-text(style="text-align:left;")
           v-text-field(v-model="newKoto.title" type="text" label="タイトル" :error-messages="newKotoError ? newKotoError.title : ''")
@@ -51,7 +52,8 @@
         v-chip(small :color="`${existing_mode === 'view' ? 'orange' : 'blue'} white--text`") {{ existing_mode === "view" ? "プレビュー" : "編集" }}
 
       template(v-if="existing_mode == 'view'")
-        v-card-text(style="text-align:left;" v-html="selectedKotoHTML")
+        v-card-text(style="text-align:left;")
+          .kotopreview(v-html="selectedKotoHTML")
       template(v-if="existing_mode == 'edit'")
         v-card-text(style="text-align:left;")
           v-text-field(v-model="selectedKoto.title" type="text" label="タイトル" :error-messages="selectedKotoError ? selectedKotoError.title : ''")
@@ -104,7 +106,7 @@ export default class Koto extends Vue {
 
   get newKotoHTML(): string {
     const option = new MarkedOptions()
-    // option.gfm = true
+    option.gfm = true
     // option.breaks = true
     return Marked.parse(this.newKoto.body, option);
   }
@@ -149,7 +151,7 @@ export default class Koto extends Vue {
   get selectedKotoHTML(): string {
     if (!this.selectedKoto) { return "" }
     const option = new MarkedOptions()
-    // option.gfm = true
+    option.gfm = true
     // option.breaks = true
     return Marked.parse(this.selectedKoto.body, option);
   }
@@ -203,6 +205,16 @@ export default class Koto extends Vue {
   }
 }
 </script>
+
+<style lang="stylus">
+.kotopreview
+  pre
+    display block
+    code
+      display block
+      color white
+      background-color grey
+</style>
 
 <style scoped lang="stylus">
 #factor
