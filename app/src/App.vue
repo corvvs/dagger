@@ -5,6 +5,12 @@ v-app#app
       v-list-item(@click.stop="mini = true; go('/f')")
         v-list-item-icon
           v-icon format_list_bulleted
+      v-list-item(@click.stop="mini = true; go('/d')")
+        v-list-item-icon
+          v-icon share
+      v-list-item(@click.stop="mini = true; go('/g')")
+        v-list-item-icon
+          v-icon touch_app
 
   v-content.content
     keep-alive
