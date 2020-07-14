@@ -9,7 +9,7 @@
   .status  {{ selection_mode || "(modeless)" }} {{ resizing_mode }}
   .svgs
     svg.svgmaster(
-      @mousemove="mm"
+      @mousemove="d_mm"
       @mouseup="mu"
       @mousedown.stop="md($event, null, null)"
     )
@@ -91,6 +91,12 @@
         title="最背面へ"
       )
         v-icon flip_to_back
+      v-btn(small icon
+        color="red"
+        @click="flip_to('back', selected_node)"
+        title="削除"
+      )
+        v-icon delete
   .indicator
     | {{ indicator_message }}
 </template>
@@ -234,6 +240,43 @@ export default class Draggable extends Vue {
     this.nodes.push(makeGrabNode({ title: `#${n}`, x: 100 + 50*n, y: 100 + 80*n }));
   }
 
+  /**
+   * *node* から/へ到達可能なnodeの辞書を返す
+   */
+  reachable_nodes(dir: "from" | "to", node: GrabNode) {
+    const reachable_node: { [key: string]: GrabNode } = {}
+    let deps: { [key: string]: GrabNode } = { [node.id]: node };
+    const link_map = dir === "from" ? this.link_map : this.reverse_link_map;
+    while (Object.keys(deps).length > 0) {
+      const d2: { [key: string]: GrabNode } = {};
+      for (const fid of Object.keys(deps)) {
+        // console.log(dir, fid, !!d2[fid])
+        if (d2[fid]) { continue; }
+        const submap = link_map[fid];
+        if (submap) {
+          for (const tid of Object.keys(submap)) {
+            if (d2[tid] || reachable_node[tid]) { continue; }
+            d2[tid] = this.node_map[tid];
+          };
+        }
+      };
+      deps = d2;
+      _.each(deps, (node, id) => reachable_node[id] = node);
+      // console.log(dir, Object.keys(deps));
+    }
+    return reachable_node;
+  }
+
+  get reachable_from_selected() {
+    if (!this.selected_node) { return null }
+    return this.reachable_nodes("from", this.selected_node);
+  }
+
+  get reachable_to_selected() {
+    if (!this.selected_node) { return null }
+    return this.reachable_nodes("to", this.selected_node);
+  }
+
   linkable(from: GrabNode, to: GrabNode) {
     // **現在のグラフはDAGであると仮定する**
 
@@ -251,12 +294,8 @@ export default class Draggable extends Vue {
     while (Object.keys(deps).length > 0) {
       const d2: { [key: string]: GrabNode } = {};
       for (const fid of Object.keys(deps)) {
-        if (fid === from.id) {
-          return false;
-        }
-        if (visited[fid]) {
-          throw new Error("not a DAG")
-        }
+        if (fid === from.id) { return false; }
+        if (visited[fid]) { continue; }
         visited[fid] = true;
         const submap = this.link_map[fid];
         if (submap) {
@@ -342,6 +381,10 @@ export default class Draggable extends Vue {
     };
     if (this.selected_node_id === node.id) {
       r.class.push("selected");
+    } else if (this.reachable_from_selected && this.reachable_from_selected[node.id]) {
+      r.class.push("reachable-from-selected")
+    } else if (this.reachable_to_selected && this.reachable_to_selected[node.id]) {
+      r.class.push("reachable-to-selected")
     }
     if (this.over_node && this.over_node.id === node.id) {
       r.class.push("over");
@@ -405,6 +448,7 @@ export default class Draggable extends Vue {
   }
 
   mm(event: MouseEvent) {
+    // console.log(this)
     const x = event.offsetX, y = event.offsetY;
     switch (this.selection_mode) {
       case "move": {
@@ -451,6 +495,10 @@ export default class Draggable extends Vue {
       }
     }
   }
+  // mm(event: MouseEvent) {
+  //   this.d_mm(event);
+  // }
+  d_mm = _.throttle(this.mm, 17);
 
   md(event: MouseEvent, node: GrabNode, mode: SelectionMode, resizeMode: ResizeMode) {
     if (!node) {
@@ -554,10 +602,15 @@ export default class Draggable extends Vue {
     fill white
     text
       fill black
+  &.reachable-from-selected .nodebody
+    fill lightyellow
+  &.reachable-to-selected .nodebody
+    fill aquamarine
   .edge
     opacity 1
     fill white
     stroke #888
+  
 
 .self
   &.move .selected .draggable
