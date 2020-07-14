@@ -108,95 +108,11 @@ import { Prop, Component, Vue } from 'vue-property-decorator';
 import firebase from "firebase";
 import * as uuid from "uuid";
 import * as U from "@/util";
+import * as D from "@/models/draggable";
 import SvgArrow from "@/components/SvgArrow.vue";
 
-type LineParameter = {
-  x0: number;
-  y0: number;
-  x1: number;
-  y1: number;
-}
 
-function crossing_point(v: LineParameter, w: LineParameter) {
-  // s = ( (v0.x - w0.x) * w1.y - (v0.y - w0.y) * w1.x) ) / (v1.x * w1.y - v1.y * w1.x)
-  const sd = (v.y0 - w.y0) * w.x1 - (v.x0 - w.x0) * w.y1;
-  const sn = (v.x1 * w.y1 - v.y1 * w.x1);
-  const s = sd / sn;
-  return _.isFinite(s) ? {
-    x: v.x0 + v.x1 * s,
-    y: v.y0 + v.y1 * s,
-  } : null;
-}
-
-function collision_point(vector: Vector, node: GrabNode) {
-  const r = Math.sqrt(Math.pow(vector.c2.x - vector.c1.x, 2) + Math.pow(vector.c2.y - vector.c1.y, 2));
-  const dx = (vector.c1.x - vector.c2.x) / r;
-  const dy = (vector.c1.y - vector.c2.y) / r;
-
-  const lines: LineParameter[] = [
-    { x0: node.x, y0: node.y, x1: 1, y1: 0 },
-    { x0: node.x, y0: node.y, x1: 0, y1: 1 },
-    { x0: node.x + node.width, y0: node.y + node.height, x1: 1, y1: 0 },
-    { x0: node.x + node.width, y0: node.y + node.height, x1: 0, y1: 1 },
-  ];
-
-  const epsilon = 0.001;
-  const edge_lines = _(lines).map(w => crossing_point({
-    x0: vector.c1.x, y0: vector.c1.y, x1: -dx, y1: -dy,
-  }, w)).compact().filter(crossing => {
-    return (crossing.x - node.x >= -epsilon)
-        && (crossing.y - node.y >= -epsilon)
-        && (node.x + node.width - crossing.x >= -epsilon)
-        && (node.y + node.height - crossing.y >= -epsilon)
-  }).sortBy(crossing => {
-    return Math.pow(crossing.x - vector.c1.x, 2) + Math.pow(crossing.y - vector.c1.y, 2)
-  }).value();
-  if (edge_lines.length === 0) { return null; }
-  return {
-    x: edge_lines[0].x,
-    y: edge_lines[0].y,
-  };
-}
-
-type Point = {
-  x: number;
-  y: number;
-}
-
-type Vector = {
-  c1: Point;
-  c2: Point;
-};
-
-type GrabNode = {
-  id: string;
-  title: string;
-  width: number;
-  height: number;
-  x: number;
-  y: number;
-  z: number;
-};
-
-type GrabLink = {
-  from_id: string;
-  to_id: string;
-};
-
-type LinkBind = {
-  x1: number;
-  y1: number;
-  x2: number;
-  y2: number;
-  stroke: string;
-}
-
-type ResizeMode = "n" | "w" | "s" | "e"
-  | "nw" | "sw" | "se" | "ne";
-
-type SelectionMode = "move" | "resize" | "link";
-
-function makeGrabNode(overwrite: Partial<GrabNode> = {}) {
+function makeGrabNode(overwrite: Partial<D.GrabNode> = {}) {
   return {
     id: uuid.v4(),
     title: "無題",
@@ -230,7 +146,7 @@ export default class Draggable extends Vue {
   get arrowHeadLength() { return 15 }
   get arrowHeadRadian() { return 20 * Math.PI / 180; }
 
-  nodes: GrabNode[] = [];
+  nodes: D.GrabNode[] = [];
   get node_map() {
     return _.keyBy(this.nodes, node => node.id)
   }
@@ -243,12 +159,12 @@ export default class Draggable extends Vue {
   /**
    * *node* から/へ到達可能なnodeの辞書を返す
    */
-  reachable_nodes(dir: "from" | "to", node: GrabNode) {
-    const reachable_node: { [key: string]: GrabNode } = {}
-    let deps: { [key: string]: GrabNode } = { [node.id]: node };
+  reachable_nodes(dir: "from" | "to", node: D.GrabNode) {
+    const reachable_node: { [key: string]: D.GrabNode } = {}
+    let deps: { [key: string]: D.GrabNode } = { [node.id]: node };
     const link_map = dir === "from" ? this.link_map : this.reverse_link_map;
     while (Object.keys(deps).length > 0) {
-      const d2: { [key: string]: GrabNode } = {};
+      const d2: { [key: string]: D.GrabNode } = {};
       for (const fid of Object.keys(deps)) {
         // console.log(dir, fid, !!d2[fid])
         if (d2[fid]) { continue; }
@@ -277,7 +193,7 @@ export default class Draggable extends Vue {
     return this.reachable_nodes("to", this.selected_node);
   }
 
-  linkable(from: GrabNode, to: GrabNode) {
+  linkable(from: D.GrabNode, to: D.GrabNode) {
     // **現在のグラフはDAGであると仮定する**
 
     // from -> to の辺があるとNG
@@ -290,9 +206,9 @@ export default class Draggable extends Vue {
     // to -> from の経路があるとNG
     // (もちろん辺もNG)
     const visited: { [key: string]: boolean } = {};
-    let deps: { [key: string]: GrabNode } = { [to.id]: from };
+    let deps: { [key: string]: D.GrabNode } = { [to.id]: from };
     while (Object.keys(deps).length > 0) {
-      const d2: { [key: string]: GrabNode } = {};
+      const d2: { [key: string]: D.GrabNode } = {};
       for (const fid of Object.keys(deps)) {
         if (fid === from.id) { return false; }
         if (visited[fid]) { continue; }
@@ -315,7 +231,7 @@ export default class Draggable extends Vue {
     return true;
   }
 
-  set_link(from: GrabNode, to: GrabNode) {
+  set_link(from: D.GrabNode, to: D.GrabNode) {
     if (this.linkable(from, to)) {
       const submap = this.link_map[from.id]
       if (!submap || !submap[to.id]) {
@@ -331,14 +247,14 @@ export default class Draggable extends Vue {
 
   link_map: {
       [key: string]: {
-        [key: string]: GrabLink
+        [key: string]: D.GrabLink
       }
   } = {};
 
   get reverse_link_map() {
     const rm: {
       [key: string]: {
-        [key: string]: GrabLink
+        [key: string]: D.GrabLink
       }
     } = {};
     _.each(this.link_map, (submap, from_key) => {
@@ -358,7 +274,7 @@ export default class Draggable extends Vue {
     _.range(1, this.nodes.length).forEach(i => this.set_link(this.nodes[i-1], this.nodes[i]))
   }
 
-  node_point(node: GrabNode, point: "n" | "s" | "w" | "e" | "nw" | "sw" | "ne" | "se") {
+  node_point(node: D.GrabNode, point: "n" | "s" | "w" | "e" | "nw" | "sw" | "ne" | "se") {
     const { x, y } = node
     const w = node.width;
     const h = node.height;
@@ -374,7 +290,7 @@ export default class Draggable extends Vue {
     }
   }
 
-  node_bind(node: GrabNode) {
+  node_bind(node: D.GrabNode) {
     const r: any = {
       class: [],
       transform: `translate(${node.x},${node.y})`,
@@ -398,10 +314,10 @@ export default class Draggable extends Vue {
   /**
    * Anchorの属性
    */
-  link_bind(anchor: GrabLink) {
+  link_bind(anchor: D.GrabLink) {
     const node_from = this.node_map[anchor.from_id];
     const node_to = this.node_map[anchor.to_id];
-    if (!node_from || !node_to) { return [] }
+    if (!node_from || !node_to) { return {} }
 
     // facing edge
     const c1 = {
@@ -414,10 +330,14 @@ export default class Draggable extends Vue {
       y: node_to.y + node_to.height / 2,
     };
 
-    const cp1 = collision_point({ c1: c2, c2: c1 }, node_from);
-    const cp2 = collision_point({ c1, c2 }, node_to);
+    const r = Math.pow(c2.x - c1.x, 2) + Math.pow(c2.y - c1.y, 2);
+    if (!r) { return {} }
+    const cp1 = D.collision_point({ c1: c2, c2: c1 }, node_from);
+    const cp2 = D.collision_point({ c1, c2 }, node_to);
     if (!cp1 || !cp2) { return {} }
-    const link: LinkBind = {
+    const rp = Math.pow(cp2.x - cp1.x, 2) + Math.pow(cp2.y - cp1.y, 2);
+    if (!rp) { return {} }
+    const link: D.LinkBind = {
       x1: cp1.x,
       y1: cp1.y,
       x2: cp2.x,
@@ -430,9 +350,9 @@ export default class Draggable extends Vue {
   selected_node_id: string = ""
   get selected_node() { return this.node_map[this.selected_node_id] }
   dragging_node_id: string = ""
-  selection_mode: SelectionMode | null = null
-  resizing_mode: ResizeMode | null = null
-  over_node: GrabNode | null = null
+  selection_mode: D.SelectionMode | null = null
+  resizing_mode: D.ResizeMode | null = null
+  over_node: D.GrabNode | null = null
   inner_offset: { x: number, y: number } | null = null
   offset: { x: number, y: number } | null = null;
   get anchored_point() {
@@ -500,7 +420,7 @@ export default class Draggable extends Vue {
   // }
   d_mm = _.throttle(this.mm, 17);
 
-  md(event: MouseEvent, node: GrabNode, mode: SelectionMode, resizeMode: ResizeMode) {
+  md(event: MouseEvent, node: D.GrabNode, mode: D.SelectionMode, resizeMode: D.ResizeMode) {
     if (!node) {
       this.selected_node_id = ""
       this.selection_mode = null
@@ -526,20 +446,20 @@ export default class Draggable extends Vue {
     this.inner_offset = null;
   }
 
-  men(event: MouseEvent, node: GrabNode) {
+  men(event: MouseEvent, node: D.GrabNode) {
     if (!this.over_node || this.over_node.id !== node.id) {
       this.over_node = node
     }
   }
 
-  mle(event: MouseEvent, node: GrabNode) {
+  mle(event: MouseEvent, node: D.GrabNode) {
     if (this.over_node && this.over_node.id === node.id) {
       // console.log(event)
       this.over_node = null
     }
   }
 
-  start_linking(node: GrabNode) {
+  start_linking(node: D.GrabNode) {
     if (this.selection_mode === "link") {
       this.selection_mode = null;
     } else {
@@ -549,7 +469,7 @@ export default class Draggable extends Vue {
     }
   }
 
-  flip_to(to: "front" | "back", node: GrabNode) {
+  flip_to(to: "front" | "back", node: D.GrabNode) {
     const i = this.nodes.findIndex(n => n.id === node.id);
     if (i < 0) { return }
     const [d] = this.nodes.splice(i, 1);

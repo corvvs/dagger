@@ -1,5 +1,5 @@
 <template lang="pug">
-g.sharp-arrow
+g.sharp-arrow(v-if="showable")
   line(
     v-bind="arrow_bind"
   )
@@ -37,6 +37,10 @@ export default class SvgArrow extends Vue {
   @Prop() stroke?: string;
   @Prop() stroke_width?: number;
 
+  get showable() {
+    return [this.x1, this.y1, this.x2, this.y2].every(v => _.isFinite(v)) && !(this.x1 === this.x2 && this.y1 === this.y2)
+  }
+
   get arrow_bind() {
     return {
       x1: this.x1, y1: this.y1,
@@ -55,6 +59,7 @@ export default class SvgArrow extends Vue {
     const uy2 = dx * Math.sin(+angle) + dy * Math.cos(+angle);
     const dx2 = dx * Math.cos(-angle) - dy * Math.sin(-angle);
     const dy2 = dx * Math.sin(-angle) + dy * Math.cos(-angle);
+    // console.log(this.x1, this.y1, this.x2, this.y2, r, ux2, uy2)
     return {
       u: {
         x1: 0, y1: 0, x2: ux2, y2: uy2,
