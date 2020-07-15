@@ -20,17 +20,27 @@ export type GrabNode = {
   z: number;
 };
 
+export type GrabNodeStatus = {
+  selected: boolean;
+  overred: boolean;
+  resizing: boolean;
+  reachable_from_selected: boolean;
+  reachable_to_selected: boolean;
+  linkable_from_selected: boolean;
+  not_linkable_from_selected: boolean;
+  link_targeted: boolean;
+};
+
 export type GrabLink = {
+  id: string;
   from_id: string;
   to_id: string;
 };
 
-export type LinkBind = {
-  x1: number;
-  y1: number;
-  x2: number;
-  y2: number;
-  stroke: string;
+export type GrabArrow = {
+  vector: Vector;
+  length?: number;
+  angle?: number;
 }
 
 export type ResizeMode = "n" | "w" | "s" | "e"
@@ -79,8 +89,8 @@ export function collision_point(vector: Vector, node: GrabNode) {
   const edge_lines = _(lines).map(w => crossing_point({
     x0: vector.c1.x, y0: vector.c1.y, x1: dx, y1: dy,
   }, w)).compact().filter(crossing => {
-    return -epsilon <= crossing.s && crossing.s <= 1 + epsilon
-        && (crossing.x - node.x >= -epsilon)
+    return -epsilon <= crossing.s && crossing.s <= 1 + epsilon // crossing は vectorが乗っている直線に乗っているが、それが線分 vector 上にあるかどうか
+        && (crossing.x - node.x >= -epsilon) // crossing が矩形 node の境界線上にあるかどうか
         && (crossing.y - node.y >= -epsilon)
         && (node.x + node.width - crossing.x >= -epsilon)
         && (node.y + node.height - crossing.y >= -epsilon)
