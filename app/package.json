@@ -9,7 +9,9 @@
   },
   "dependencies": {
     "@vue/composition-api": "^0.6.5",
+    "animejs": "^3.2.0",
     "core-js": "^3.6.5",
+    "d3-dag": "^0.3.5",
     "firebase": "^7.15.3",
     "marked": "^1.1.0",
     "marked-ts": "^1.0.0-beta.5",
@@ -25,6 +27,7 @@
     "vuetify": "^2.2.11"
   },
   "devDependencies": {
+    "@types/animejs": "^3.1.1",
     "@types/lodash": "^4.14.155",
     "@types/moment": "^2.13.0",
     "@types/uuid": "^8.0.0",

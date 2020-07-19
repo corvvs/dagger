@@ -131,8 +131,9 @@ export default class SvgGrabNode extends Vue {
   overflow hidden
   .nodebody
     fill white
-    text
-      fill black
+  text
+    fill black
+    pointer-events none
   &.reachable-from-selected .nodebody
     fill lightyellow
   &.reachable-to-selected .nodebody
