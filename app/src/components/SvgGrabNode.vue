@@ -10,6 +10,7 @@ g.node(
       @mousedown.stop="mdn_body($event)"
       @mouseenter.stop="men($event)"
       @mouseleave.stop="mle($event)"
+      @click="$emit('click', $event)"
     )
   text(transform="translate(4,20)") {{ node.title }}
 
@@ -133,6 +134,7 @@ export default class SvgGrabNode extends Vue {
     fill white
   text
     fill black
+    user-select none
     pointer-events none
   &.reachable-from-selected .nodebody
     fill lightyellow

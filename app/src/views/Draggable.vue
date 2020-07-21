@@ -1,73 +1,104 @@
 <template lang="pug">
 .self(v-bind="self_bind")
-  .panel
-    .subpanel
-      h4 Nodes
-      v-btn(x-small @click="add_new_node()")
-        v-icon add
-        | New Node
-      v-btn(x-small @click="align_nodes()")
-        | Align
-      v-btn(x-small @click="shift()")
-        | Shift
-  .status  {{ selection_mode || "(modeless)" }} {{ resizing_mode }}
-  .svgs
-    svg.svgmaster(
-      @mousemove.stop="d_mm"
-      @mouseup.stop="mup_field"
-      @mousedown.stop="mdown_field"
-    )
-      g.field(
-        :transform="field_transform"
+  .mid_pane
+    .svgs
+      svg.svgmaster(
+        @mousemove.stop="d_mm"
+        @mouseup.stop="mup_field"
+        @mousedown.stop="mdown_field"
       )
-        g.anchors
-          g.anchor_from(v-for="(anchor, id) in link_dictionary" :key="id")
-            SvgArrow(v-bind="link_binds[id]")
+        g.field(
+          :transform="field_transform"
+        )
+          g.anchors
+            g.anchor_from(v-for="(anchor, id) in link_dictionary" :key="id")
+              SvgArrow(v-bind="link_binds[id]")
 
-        g.nodes
-          SvgGrabNode(v-for="node in nodes" :key="node.id"
-            :node="node"
-            :status="node_status_map[node.id]"
-            @grabMouseDownBody="mdown_node"
-            @grabMouseDownResizer="mdown_node_resizer"
-            @grabMouseEnter="menter_node"
-            @grabMouseLeave="mleave_node"
-          )
-          g.linker(v-if="selection_mode === 'link' && selected_node && anchored_point")
-              SvgArrow(
-                :x1="selected_node.x + selected_node.width/2" :y1="selected_node.y + selected_node.height/2"
-                :x2="anchored_point.x" :y2="anchored_point.y" stroke="red"
-              )
+          g.nodes
+            SvgGrabNode(v-for="node in nodes" :key="node.id"
+              :node="node"
+              :status="node_status_map[node.id]"
+              @grabMouseDownBody="mdown_node"
+              @grabMouseDownResizer="mdown_node_resizer"
+              @grabMouseEnter="menter_node"
+              @grabMouseLeave="mleave_node"
+              @click="receive_grab"
+            )
+            g.linker(v-if="selection_mode === 'link' && selected_node && anchored_point")
+                SvgArrow(
+                  :x1="selected_node.x + selected_node.width/2" :y1="selected_node.y + selected_node.height/2"
+                  :x2="anchored_point.x" :y2="anchored_point.y" stroke="red"
+                )
 
 
-    .node-panel(v-if="selected_node" :style="{ position: 'absolute', left: `${selected_node.x - 5 + field_offset.x}px`, top: `${selected_node.y - 40 + field_offset.y}px` }")
-      v-btn(small icon
-        @click="start_linking(selected_node)"
-        :color="selection_mode === 'link' ? 'info' : 'grey'"
-        dark
-        title="リンク"
-      )
-        v-icon(
-        dark
-        ) link
-      v-btn(small icon
-        @click="flip_node_to('front', selected_node)"
-        title="最前面へ"
-      )
-        v-icon flip_to_front
-      v-btn(small icon
-        @click="flip_node_to('back', selected_node)"
-        title="最背面へ"
-      )
-        v-icon flip_to_back
-      v-btn(small icon
-        color="red"
-        @click="delete_node(selected_node)"
-        title="削除"
-      )
-        v-icon delete
-  .indicator
-    | {{ indicator_message }}
+      .node-panel(v-if="selected_node" :style="{ left: `${selected_node.x - 5 + field_offset.x}px`, top: `${selected_node.y - 40 + field_offset.y}px` }")
+        v-btn(small icon
+          @click="start_linking(selected_node)"
+          :color="selection_mode === 'link' ? 'info' : 'grey'"
+          dark
+          title="リンク"
+        )
+          v-icon(
+          dark
+          ) link
+        v-btn(small icon
+          @click="flip_node_to('front', selected_node)"
+          title="最前面へ"
+        )
+          v-icon flip_to_front
+        v-btn(small icon
+          @click="flip_node_to('back', selected_node)"
+          title="最背面へ"
+        )
+          v-icon flip_to_back
+        v-btn(small icon
+          color="red"
+          @click="delete_node(selected_node)"
+          title="削除"
+        )
+          v-icon delete
+  .right_pane
+    .panel
+      .subpanel
+        h4 Nodes
+        v-btn(x-small @click="add_new_node()")
+          v-icon add
+          | New Node
+        v-btn(x-small @click="align_nodes()")
+          | Align
+        v-btn(x-small @click="shift()")
+          | Shift
+        v-btn(x-small @click="snap_on = !snap_on" :color="snap_on ? 'blue info' : ''")
+          | Snap
+    .panel
+      v-slider(v-model="field_zoom_level" label="Field Zoom" :min="-4" :max="4" step="0" :messages="`${field_zoom_level}`")
+    .panel.status
+      .line
+        .name Selection Mode
+        .value {{ selection_mode || "(none)" }}
+      .line
+        .name Selected Node
+        .value {{ selected_node_id || "(none)" }}
+      .line
+        .name Resize Mode
+        .value {{ resizing_mode || "(none)" }}
+      .line
+        .name Dragging Node
+        .value {{ dragging_node_id || "(none)" }}
+      .line
+        .name Overred Node
+        .value {{ over_node ? over_node.id : "(none)" }}
+      .line
+        .name Field Offset
+        .value {{ field_offset || "(none)" }}
+      .line
+        .name Cursor Offset
+        .value {{ cursor_offset || "(none)" }}
+      .line
+        .name Inner Offset
+        .value {{ inner_offset || "(none)" }}
+    .indicator
+      | {{ indicator_message }}
 </template>
 
 <script lang="ts">
@@ -82,7 +113,6 @@ import SvgGrabNode from "@/components/SvgGrabNode.vue";
 import SvgArrow from "@/components/SvgArrow.vue";
 import anime from 'animejs'
 const d3_dag = require("d3-dag");
-console.log(d3_dag);
 
 type LinkMap = {
   [key: string]: {
@@ -92,7 +122,7 @@ type LinkMap = {
 
 function makeGrabNode(overwrite: Partial<D.GrabNode> = {}) {
   return {
-    id: uuid.v4(),
+    id: `nd_${U.u_shorten_uuid(uuid.v4()).substring(0, 8)}`,
     title: "無題",
     width: 40,
     height: 30,
@@ -107,12 +137,10 @@ function topological_sort(nodes: D.GrabNode[], link_map: LinkMap, reverse_link_m
   const node_map = _.keyBy(nodes, n => n.id);
   const sorted: D.GrabNode[] = [];
   const reverse_link_count = _.mapValues(reverse_link_map, v => Object.keys(v).length);
-  console.log(reverse_link_count);
   let froms: D.GrabNode[] = nodes.filter(n => !reverse_link_count[n.id]);
   for(let i = 0; i < nodes.length; ++i) {
     const f = froms.shift();
     if (!f) { break; }
-    console.log(f.title)
     sorted.push(f);
     if (!link_map[f.id]) { continue; }
     _.each(link_map[f.id], (link, t) => {
@@ -179,9 +207,7 @@ function align_by_d3_dag(sorted_nodes: D.GrabNode[], link_map: LinkMap, reverse_
     if (ymax < n.y) { ymax = n.y }
   });
   const layouter = d3_dag.sugiyama(dag).nodeSize([60, 60]);
-  console.log(layouter);
   layouter(dag);
-  console.log(dag);
 
   let xmin2 = Infinity;
   let ymin2 = Infinity;
@@ -240,6 +266,7 @@ export default class Draggable extends Vue {
       resizing: selected && this.selection_mode === "resize",
       reachable_from_selected: !!(this.reachable_map && this.reachable_map.from_selected[node.id]),
       reachable_to_selected: !!(this.reachable_map && this.reachable_map.to_selected[node.id]),
+      neighboring_with_selected: !!(this.reachable_map && this.reachable_map.to_neighboring_link[node.id]),
       linkable_from_selected,
       not_linkable_from_selected: linking && !this.linkable_from_selected(node),
       link_targeted: !!(!selected && linkable_from_selected && overred),
@@ -262,8 +289,10 @@ export default class Draggable extends Vue {
    * *node* から/へ到達可能なnodeの辞書を返す
    */
   reachable_nodes(dir: "from" | "to", origin_node: D.GrabNode) {
-    const reachable_node: { [key: string]: number } = {}
-    const neighboring_link: { [key: string]: D.GrabLink } = {}
+    const reachable_node: { [key: string]: number } = {};
+    const neighboring_node: { [key: string]: D.GrabNode } = {};
+    const neighboring_link: { [key: string]: D.GrabLink } = {};
+    const connected_link: { [key: string]: D.GrabLink } = {};
     let deps: { [key: string]: D.GrabNode } = { [origin_node.id]: origin_node };
     const link_map = dir === "from" ? this.link_map : this.reverse_link_map;
     let distance = 0;
@@ -276,11 +305,14 @@ export default class Draggable extends Vue {
         const submap = link_map[fid];
         if (submap) {
           for (const tid of Object.keys(submap)) {
-            if (d2[tid] || reachable_node[tid]) { continue; }
+            const link = submap[tid];
+            const link_id = link.id;
             if (distance === 1) {
-              const link = submap[tid];
-              neighboring_link[`${link.from_id}_${link.to_id}`] = link;
+              neighboring_link[link_id] = link;
+              neighboring_node[tid] = this.node_map[tid];
             }
+            connected_link[link_id] = link;
+            if (reachable_node[tid]) { continue }
             d2[tid] = this.node_map[tid];
           };
         }
@@ -289,9 +321,12 @@ export default class Draggable extends Vue {
       _.each(deps, (node, id) => reachable_node[id] = distance);
       // console.log(dir, Object.keys(deps));
     }
+    // console.log(neighboring_link, connected_link)
     return {
       reachable_node,
+      neighboring_node,
       neighboring_link,
+      connected_link,
     };
   }
 
@@ -302,8 +337,10 @@ export default class Draggable extends Vue {
     return {
       from_selected: from.reachable_node,
       from_neighboring_link: from.neighboring_link,
+      from_connected_link: from.connected_link,
       to_selected: to.reachable_node,
       to_neighboring_link: to.neighboring_link,
+      to_connected_link: to.connected_link,
     }
   }
 
@@ -354,33 +391,28 @@ export default class Draggable extends Vue {
     return true;
   }
 
-  mounted() {
-    const L = 7;
-    // _.range(0, 80).forEach(i => {
-    //   this.add_new_node({ title: `#${i+1}`, x: 50 + (i % L) * 120, y: 50 + Math.floor(i / L) * 120 })
-    // });
-    // _.range(13, 17).forEach(k => {
-    //     _.range(k, this.nodes.length).forEach(i => {
-    //       this.set_link(this.nodes[i-k], this.nodes[i])
-    //     })
-    // });
-    const N = 20;
+  private initiate() {
+    const N = 80;
+    const R = N * 50 * 1.2 / 2 / Math.PI;
     _.range(0, N).forEach(i => {
-      const r = (Math.random() * 0.3 + 0.7) * 300;
+      const r = R;
       const t = 2 * Math.PI / N * i;
       this.add_new_node({
         title: `#${i+1}`,
         x: 400 + r * Math.cos(t),
         y: 400 + r * Math.sin(t),
       });
-    })
-    _.range(0, N * 3).forEach(() => {
+    });
+    _.range(0, N * 2).forEach(() => {
       const i = Math.floor(Math.random() * this.nodes.length);
       const j = Math.floor(Math.random() * this.nodes.length);
       this.set_link(this.nodes[i], this.nodes[j]);
     });
     this.flush_node_status_map()
+  }
 
+  mounted() {
+    this.initiate()
   }
 
   get self_bind() {
@@ -422,6 +454,15 @@ export default class Draggable extends Vue {
     if (!cp1 || !cp2) { return {} }
     const rp = Math.pow(cp2.x - cp1.x, 2) + Math.pow(cp2.y - cp1.y, 2);
     if (!rp) { return {} }
+    const neighboring = !!(this.reachable_map && (this.reachable_map.from_neighboring_link[anchor.id] || this.reachable_map.to_neighboring_link[anchor.id]));
+    const connected = !!(this.reachable_map && (this.reachable_map.from_connected_link[anchor.id] || this.reachable_map.to_connected_link[anchor.id]));
+    // console.log(anchor.id, neighboring, connected)
+    const stroke_attr = this.selected_node ? {
+      stroke: (neighboring ? "#111" : connected ? "#444" : "#eee"),
+      "stroke-dasharray": !neighboring && connected ? "3 2" : "",
+    } : {
+      stroke: "#666",
+    };
     return {
       name: anchor.id,
       x1: cp1.x,
@@ -429,20 +470,75 @@ export default class Draggable extends Vue {
       x2: cp2.x,
       y2: cp2.y,
       arrowheadPosition: 0.8,
-      stroke: this.reachable_map && (this.reachable_map.from_neighboring_link[anchor.id] || this.reachable_map.to_neighboring_link[anchor.id]) ? "black" : "#666",
+      ...stroke_attr,
     };
   }
 
   selected_node_id: string = ""
   get selected_node() { return this.node_map[this.selected_node_id] }
+  @Watch("selected_node_id")
+  changed_selected_node_id() {
+    this.flush_node_status_map()
+    this.update_all_links()
+    if (this.selected_node_id) {
+      const nodes = this.nodes.filter(n => n.id !== this.selected_node_id)
+      this.x_sorted_nodes = _.sortBy(nodes.map(n => ({ t: n.x + n.width / 2, node: n })), n => n.t);
+      this.y_sorted_nodes = _.sortBy(nodes.map(n => ({ t: n.y + n.height / 2, node: n })), n => n.t);
+      console.log(this.x_sorted_nodes.map(n => n.node.title))
+      console.log(this.y_sorted_nodes.map(n => n.node.title))
+    }
+  }
+  
+  x_sorted_nodes: { t: number, node: D.GrabNode }[] = [];
+  y_sorted_nodes: { t: number, node: D.GrabNode }[] = [];
   dragging_node_id: string = ""
+
+  snap_on = true
+  snap_to(tx: number, ty: number, node: D.GrabNode) { 
+    /**
+     * 昇順ソートされた点列 ps と座標 t が与えられているとき、座標 t にスナップするべき ps の要素 p を見つけたい。
+     * p が満たしているべき条件は、スナップの"猶予"をdとすると
+     * - t - d <= p
+     * - p <= t + d
+     */
+    const x = tx + node.width / 2;
+    const y = ty + node.height / 2;
+    const snap_width = 20;
+    const x0 = _.findIndex(this.x_sorted_nodes, n => x - snap_width <= n.t);
+    const x1 = _.findLastIndex(this.x_sorted_nodes, n => n.t <= x + snap_width);
+    const y0 = _.findIndex(this.y_sorted_nodes, n => y - snap_width <= n.t);
+    const y1 = _.findLastIndex(this.y_sorted_nodes, n => n.t <= y + snap_width);
+    const x_snapped = (x0 >= 0 && x1 >= 0 && x0 <= x1) ? this.x_sorted_nodes[Math.floor((x0 + x1 + 1) / 2)] : null;
+    const y_snapped = (y0 >= 0 && y1 >= 0 && y0 <= y1) ? this.y_sorted_nodes[Math.floor((y0 + y1 + 1) / 2)] : null;
+    const snap = {
+      x: x_snapped ? x_snapped.t - node.width / 2 : tx,
+      y: y_snapped ? y_snapped.t - node.height / 2 : ty,
+    };
+    // if (x_snapped || y_snapped) {
+    //   console.log(x_snapped, y_snapped, x, y, snap.x, snap.y, x0, x1, y0, y1);
+    // }
+    return snap;
+  }
+
   selection_mode: D.SelectionMode | null = null
+  @Watch("selection_mode")
+  changed_selection_mode() {
+    this.flush_node_status_map()
+    this.update_all_links()
+  }
+
   resizing_mode: D.ResizeMode | null = null
   over_node: D.GrabNode | null = null
   /**
    * マウスカーソルの現在位置
    */
   cursor_offset: { x: number, y: number } | null = null;
+  @Watch("cursor_offset")
+  changed_cursor_offset() {
+    if (this.cursor_offset) {
+      this.indicator_message = JSON.stringify(this.cursor_offset);
+    }
+  }
   /**
    * ノードの内部座標系におけるオフセット値
    * = ノードの原点から見たオフセット位置の座標
@@ -454,8 +550,13 @@ export default class Draggable extends Vue {
    * = SVG座標系の原点から見た「現在のビューポートの原点に対応する位置」の座標
    */
   field_offset: { x: number, y: number } = { x: 0, y: 0 };
+  /**
+   * フィールドのズームレベル
+   */
+  field_zoom_level = 0;
   get field_transform() {
-    return `translate(${this.field_offset.x},${this.field_offset.y})`;
+    const scale = Math.pow(2, this.field_zoom_level);
+    return `translate(${this.field_offset.x},${this.field_offset.y}) scale(${scale}, ${scale})`;
   }
   get anchored_point() {
     if (this.selection_mode === "link") {
@@ -473,7 +574,6 @@ export default class Draggable extends Vue {
    * MouseMove
    */
   mm(event: MouseEvent) {
-    // console.log(this)
     if (!this.selection_mode) {
       if (this.mdowning_field && this.cursor_offset) {
         // フィールド
@@ -488,8 +588,20 @@ export default class Draggable extends Vue {
       case "move": {
         const node = this.node_map[this.dragging_node_id];
         if (!node || !this.inner_offset) { return }
-        node.x = x - this.inner_offset.x;
-        node.y = y - this.inner_offset.y; 
+        const lx = x - this.inner_offset.x;
+        const ly = y - this.inner_offset.y;
+        if (this.snap_on) {
+          const snap = this.snap_to(
+            lx,
+            ly,
+            node
+          );  
+          node.x = snap.x;
+          node.y = snap.y; 
+        } else {
+          node.x = lx;
+          node.y = ly; 
+        }
         this.flip_node_to("front", node);
         this.update_links(node);
         break;
@@ -553,7 +665,8 @@ export default class Draggable extends Vue {
       }
     }
   }
-  d_mm = _.throttle(this.mm, 17);
+  d_mm = _.throttle(this.mm, 33);
+  // d_mm = _.throttle(_.debounce(this.mm, 34), 34);
 
 
   mdowning_field = false
@@ -566,11 +679,9 @@ export default class Draggable extends Vue {
       this.selected_node_id = ""
       this.selection_mode = null
       this.resizing_mode = null
-      this.flush_node_status_map()
     }
     this.mdowning_field = true
     this.cursor_offset = { x: event.clientX, y: event.clientY };
-    this.indicator_message = JSON.stringify(this.cursor_offset);
   }
 
   mdown_node(arg: { event: MouseEvent, node: D.GrabNode }) {
@@ -582,28 +693,24 @@ export default class Draggable extends Vue {
       }
     } else {
       this.dragging_node_id = node.id
-      this.inner_offset = { x: event.clientX - node.x, y: event.clientY - node.y }; 
-      const selected_node = this.selected_node;
+      this.inner_offset = { x: Math.floor(event.clientX - node.x), y: Math.floor(event.clientY - node.y) }; 
       this.selection_mode = "move"
       this.selected_node_id = node.id
       this.resizing_mode = null
-      this.flush_node_status_map()
     }
     this.cursor_offset = { x: event.clientX, y: event.clientY };
-    this.indicator_message = JSON.stringify(this.cursor_offset);
   }
 
   mdown_node_resizer(arg: { event: MouseEvent, node: D.GrabNode, resizeMode: D.ResizeMode }) {
     // console.log(arg.event.type, this.selection_mode)
     const { event, node, resizeMode } = arg;
     this.dragging_node_id = node.id
-    this.inner_offset = { x: event.clientX - node.x, y: event.clientY - node.y };
+    this.inner_offset = { x: Math.floor(event.clientX - node.x), y: Math.floor(event.clientY - node.y) }; 
     this.selection_mode = "resize"
     this.selected_node_id = node.id
     this.resizing_mode = resizeMode
     this.set_node_status(node)
     this.cursor_offset = { x: event.clientX, y: event.clientY };
-    this.indicator_message = JSON.stringify(this.cursor_offset);
   }
 
   mup_field(event: MouseEvent) {
@@ -635,7 +742,7 @@ export default class Draggable extends Vue {
   }
 
   receive_grab(arg: any) {
-    // console.log(arg)
+    console.log(arg)
   }
 
   start_linking(node: D.GrabNode) {
@@ -646,7 +753,6 @@ export default class Draggable extends Vue {
       this.selection_mode = "link";
       this.cursor_offset = null;
     }
-    this.flush_node_status_map()
   }
 
   flip_node_to(to: "front" | "back", node: D.GrabNode) {
@@ -681,7 +787,7 @@ export default class Draggable extends Vue {
         };
         this.$set(this.link_map[from.id], to.id, link);
         this.$set(this.link_dictionary, id, link);
-        this.$set(this.link_binds, id, this.link_bind(link));
+      this.$set(this.link_binds, id, this.link_bind(link));
       }
     } else {
       this.indicator_message = "duplicated link";
@@ -777,7 +883,7 @@ export default class Draggable extends Vue {
         dy: layout.x - n.y,
       }
     }).keyBy(d => d.node.id).value();
-    console.log(displacement);
+    // console.log(displacement);
     anime({
       targets: animearg,
       x: 100,
@@ -799,7 +905,7 @@ export default class Draggable extends Vue {
 
   align_nodes() {
     const sorted = topological_sort(this.nodes, this.link_map, this.reverse_link_map);
-    console.log(sorted.map(n => n.title));
+    // console.log(sorted.map(n => n.title));
     align_by_d3_dag(sorted, this.link_map, this.reverse_link_map);
   }
 }
@@ -808,10 +914,22 @@ export default class Draggable extends Vue {
 <style scoped lang="stylus">
 .self
   display flex
-  flex-direction column
-  position relative
+  flex-direction row
   height 100%
   background-color #fff
+  .mid_pane
+    overflow hidden
+    flex-grow 1
+    flex-shrink 1
+    display flex
+    flex-direction column
+    position relative
+    height 100%
+  .right_pane
+    flex-basis 300px
+    flex-grow 0
+    flex-shrink 0
+  
 
 .panel
   flex-shrink 0
@@ -833,10 +951,13 @@ export default class Draggable extends Vue {
     height 100%
     width 100%
   .node-panel
+    position absolute
+    word-break keep-all
+    white-space nowrap
     border 1px solid black
     background-color white
     opacity 0.75
-
+    height 30px
 
 .self
   &.move .selected .draggable
@@ -872,4 +993,22 @@ export default class Draggable extends Vue {
           cursor pointer
         &.nonlinkable .nodebody
           cursor not-allowed
+
+.panel.status
+  display flex
+  flex-direction column
+  .line
+    display flex
+    flex-direction row
+    width 100%
+    .name
+      text-align left
+      font-weight bold
+      flex-shrink 0
+      flex-grow 0
+    .value
+      overflow hidden
+      text-align right
+      flex-shrink 1
+      flex-grow 1
 </style>

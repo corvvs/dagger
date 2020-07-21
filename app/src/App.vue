@@ -11,6 +11,11 @@ v-app#app
       v-list-item(@click.stop="mini = true; go('/g')")
         v-list-item-icon
           v-icon touch_app
+      v-list-item(@click.stop="show_user = true")
+        v-list-item-icon
+          v-icon person
+        v-list-item-content
+          v-list-item-title User
 
   v-content.content
     keep-alive
@@ -32,10 +37,6 @@ v-app#app
             h4 ログイン
             v-text-field(v-model="user_mail" type="mail" label="メールアドレス" placeholder="xxxx@example.com")
             v-text-field(v-model="user_password" type="password" label="パスワード")
-            h5 テスト用ユーザ
-            ul
-              li mail: yosuke+test@stily.co.jp
-              li password: testtest
         v-card-actions
           v-btn(@click="show_user = false") 閉じる
           template(v-if="user")

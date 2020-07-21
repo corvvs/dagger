@@ -24,6 +24,7 @@ export type GrabNodeStatus = {
   selected: boolean;
   overred: boolean;
   resizing: boolean;
+  neighboring_with_selected: boolean;
   reachable_from_selected: boolean;
   reachable_to_selected: boolean;
   linkable_from_selected: boolean;
