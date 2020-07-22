@@ -64,10 +64,8 @@
         v-btn(x-small @click="add_new_node()")
           v-icon add
           | New Node
-        v-btn(x-small @click="align_nodes()")
+        v-btn(x-small @click="align_nodes()" :disabled="animating")
           | Align
-        v-btn(x-small @click="shift()")
-          | Shift
         v-btn(x-small @click="snap_on = !snap_on" :color="snap_on ? 'blue info' : ''")
           | Snap
     .panel
@@ -392,18 +390,21 @@ export default class Draggable extends Vue {
   }
 
   private initiate() {
-    const N = 80;
+    const N = 30;
     const R = N * 50 * 1.2 / 2 / Math.PI;
+    const L = 10;
     _.range(0, N).forEach(i => {
       const r = R;
       const t = 2 * Math.PI / N * i;
       this.add_new_node({
         title: `#${i+1}`,
-        x: 400 + r * Math.cos(t),
-        y: 400 + r * Math.sin(t),
+        x: 10 + i % L * 80,
+        y: 10 + Math.floor(i / L) * 80,
+        // x: 400 + r * Math.cos(t),
+        // y: 400 + r * Math.sin(t),
       });
     });
-    _.range(0, N * 2).forEach(() => {
+    _.range(0, N * 3).forEach(() => {
       const i = Math.floor(Math.random() * this.nodes.length);
       const j = Math.floor(Math.random() * this.nodes.length);
       this.set_link(this.nodes[i], this.nodes[j]);
@@ -493,7 +494,10 @@ export default class Draggable extends Vue {
   y_sorted_nodes: { t: number, node: D.GrabNode }[] = [];
   dragging_node_id: string = ""
 
-  snap_on = true
+  /**
+   * ノードのドラッグ時にスナップするかどうか
+   */
+  snap_on = false
   snap_to(tx: number, ty: number, node: D.GrabNode) { 
     /**
      * 昇順ソートされた点列 ps と座標 t が与えられているとき、座標 t にスナップするべき ps の要素 p を見つけたい。
@@ -861,52 +865,56 @@ export default class Draggable extends Vue {
     this.nodes.splice(i, 1);
   }
 
-
-  shift() {
-    let t = 0;
-    const animearg = { x: 0 };
-    const sorted = topological_sort(this.nodes, this.link_map, this.reverse_link_map);
-    // const alignment = this.align_nodes();
-    // const displacement = _.mapValues(alignment, d => {
-    //   return {
-    //     node: d.node,
-    //     dx: d.x * 50 + 50 - d.node.x,
-    //     dy: d.y * 50 + 50 - d.node.y,
-    //   };
-    // });
-    const layout_map = align_by_d3_dag(sorted, this.link_map, this.reverse_link_map);
-    const displacement = _(sorted).map((n,i) => {
-      const layout = layout_map[n.id];
-      return {
-        node: n,
-        dx: layout.y - n.x,
-        dy: layout.x - n.y,
-      }
-    }).keyBy(d => d.node.id).value();
-    // console.log(displacement);
-    anime({
-      targets: animearg,
-      x: 100,
-      round: 1,
-      easing: 'easeOutExpo',
-      duration: 400,
-      update: () => {
-        const t2 = animearg.x;
-        this.nodes.forEach(node => {
-          node.x += displacement[node.id]!.dx * (t2 - t) / 100;
-          node.y += displacement[node.id]!.dy * (t2 - t) / 100;
-        });
-        t = t2;
-        this.flush_node_status_map()
-        this.update_all_links()
-      }
-    })
-  }
-
-  align_nodes() {
-    const sorted = topological_sort(this.nodes, this.link_map, this.reverse_link_map);
-    // console.log(sorted.map(n => n.title));
-    align_by_d3_dag(sorted, this.link_map, this.reverse_link_map);
+  animating = false
+  async align_nodes() {
+    try {
+      let t = 0;
+      const sorted = topological_sort(this.nodes, this.link_map, this.reverse_link_map);
+      const index_map: { [key: string]: number } = {};
+      const layout_map = align_by_d3_dag(sorted, this.link_map, this.reverse_link_map);
+      _.sortBy(sorted, n => layout_map[n.id].y).forEach((n,i) => index_map[n.id] = i);
+      const displacement = _(sorted).map((n,i) => {
+        const layout = layout_map[n.id];
+        return {
+          node: n,
+          dx: layout.y - n.x,
+          dy: layout.x - n.y,
+        }
+      }).keyBy(d => d.node.id).value();
+      // console.log(displacement);
+      const node_map = _.keyBy(this.nodes, n => n.id);
+      const target_arg = _.mapValues(node_map, n => 0);
+      const th = { ...target_arg };
+      const destination_arg = _.mapValues(node_map, n => {
+        return {
+          value: 100,
+          delay: index_map[n.id] / sorted.length * 250,
+        };
+      });
+      const p0 = _.mapValues(node_map, n => _.pick(n, "x", "y"));
+      console.log(`[anime] start.`);
+      this.animating = true;
+      await anime({
+        targets: target_arg,
+        ...destination_arg,
+        duration: 500,
+        round: 1,
+        easing: 'easeOutExpo',
+        update: () => {
+          this.nodes.forEach(node => {
+            const t = target_arg[node.id];
+            node.x = p0[node.id]!.x + displacement[node.id]!.dx * t / 100;
+            node.y = p0[node.id]!.y + displacement[node.id]!.dy * t / 100;
+          });
+          this.flush_node_status_map()
+          this.update_all_links()
+        }
+      }).finished;
+      console.log(`[anime] fin.`);
+    } catch (e) {
+      console.error(e);
+    }
+    this.animating = false;
   }
 }
 </script>
