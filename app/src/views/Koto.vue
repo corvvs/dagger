@@ -161,7 +161,7 @@ export default class Koto extends Vue {
   }
 
   // -- Kotos IO --
-  lister!: F.FirestoreObjectLister<F.Koto>;
+  lister!: F.KotoLister;
   unsubscriber!: () => void;
   docs: F.Koto[] = [];
   koto_working = false;

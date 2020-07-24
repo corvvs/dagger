@@ -20,7 +20,7 @@
 
     // Do not allow type assertions that do nothing. This is a big warning that the developer may not understand the
     // code currently being edited (they may be incorrectly handling a different type case that does not exist).
-    "no-unnecessary-type-assertion": true,
+    "no-unnecessary-type-assertion": false,
 
     // Disallow nonsensical label usage.
     "label-position": true,
@@ -43,7 +43,7 @@
 
     // Disallows a variable definition in an inner scope from shadowing a variable in an outer scope. Developers should
     // instead use a separate variable name.
-    "no-shadowed-variable": true,
+    "no-shadowed-variable": false,
 
     // Empty blocks are almost never needed. Allow the one general exception: empty catch blocks.
     "no-empty": [true, "allow-empty-catch"],
@@ -64,6 +64,9 @@
 
     // Disallow control flow statements, such as return, continue, break, and throw in finally blocks.
     "no-unsafe-finally": true,
+
+    // Do not allow variables to be used before they are declared.
+    "no-use-before-declare": false,
 
     // Expressions must always return a value. Avoids common errors like const myValue = functionReturningVoid();
     "no-void-expression": [true, "ignore-arrow-function-shorthand"],
@@ -93,7 +96,7 @@
     // Warn when using deprecated APIs.
     "deprecation": {"severity": "warning"},
 
-    // -- Light Warnings --
+    // -- Light Warnigns --
     // These rules are intended to help developers use better style. Simpler code has fewer bugs. These would be "info"
     // if TSLint supported such a level.
 
@@ -104,10 +107,13 @@
     // Warns if function overloads could be unified into a single function with optional or rest parameters.
     "unified-signatures": {"severity": "warning"},
 
+    // Warns if code has an import or variable that is unused.
+    "no-unused-variable": {"severity": "warning"},
+
     // Prefer const for values that will not change. This better documents code.
     "prefer-const": {"severity": "warning"},
 
-    // Multi-line object literals and function calls should have a trailing comma. This helps avoid merge conflicts.
+    // Multi-line object liiterals and function calls should have a trailing comma. This helps avoid merge conflicts.
     "trailing-comma": {"severity": "warning"}
   },
 

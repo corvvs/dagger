@@ -8,7 +8,7 @@ v-app#app
       v-list-item(@click.stop="mini = true; go('/d')")
         v-list-item-icon
           v-icon share
-      v-list-item(@click.stop="mini = true; go('/g')")
+      v-list-item(@click.stop="mini = true; go('/ldag')")
         v-list-item-icon
           v-icon touch_app
       v-list-item(@click.stop="show_user = true")

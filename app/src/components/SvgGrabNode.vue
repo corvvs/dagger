@@ -5,7 +5,6 @@ g.node(
   rect.nodebody.draggable(
       x="0" y="0"
       :width="node.width" :height="node.height"
-      stroke="#888"
       draggable
       @mousedown.stop="mdn_body($event)"
       @mouseenter.stop="men($event)"
@@ -81,6 +80,9 @@ export default class SvgGrabNode extends Vue {
         r.class.push("nonlinkable")
       }
     }
+    if (this.status.source_sink) {
+      r.class.push(`${this.status.source_sink}`);
+    }
     return r;
   }
 
@@ -132,6 +134,13 @@ export default class SvgGrabNode extends Vue {
   overflow hidden
   .nodebody
     fill white
+    stroke #888
+  &.source .nodebody
+    fill #efe
+  &.sink .nodebody
+    fill #fee
+
+
   text
     fill black
     user-select none

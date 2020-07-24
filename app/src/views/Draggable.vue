@@ -1,5 +1,5 @@
 <template lang="pug">
-.self(v-bind="self_bind")
+.self(v-bind="self_bind" v-if="dag")
   .mid_pane
     .svgs
       svg.svgmaster(
@@ -58,22 +58,31 @@
         )
           v-icon delete
   .right_pane
+    h4 I/O
+    h5 {{ dag.id }}
     .panel
       .subpanel
-        h4 Nodes
+        v-btn(x-small :disabled="!dag_savable" :loading="dag_saving" @click="dag_save()")
+          v-icon(small) cloud_upload
+          | Save
+        v-btn(x-small :disabled="!dag_savable" :loading="dag_saving" @click="dag_load()")
+          v-icon(small) cloud_download
+          | Load
+    h4 Edit
+    .panel
+      .subpanel
         v-btn(x-small @click="add_new_node()")
-          v-icon add
+          v-icon(small) add
           | New Node
         v-btn(x-small @click="align_nodes()" :disabled="animating")
           | Align
         v-btn(x-small @click="snap_on = !snap_on" :color="snap_on ? 'blue info' : ''")
           | Snap
-    .panel
       v-slider(v-model="field_zoom_level" label="Field Zoom" :min="-4" :max="4" step="0" :messages="`${field_zoom_level}`")
     .panel.status
       .line
         .name Selection Mode
-        .value {{ selection_mode || "(none)" }}
+        .value {{ selection_mode || "(nonse)" }}
       .line
         .name Selected Node
         .value {{ selected_node_id || "(none)" }}
@@ -95,8 +104,6 @@
       .line
         .name Inner Offset
         .value {{ inner_offset || "(none)" }}
-    .indicator
-      | {{ indicator_message }}
 </template>
 
 <script lang="ts">
@@ -110,13 +117,6 @@ import * as D from "@/models/draggable";
 import SvgGrabNode from "@/components/SvgGrabNode.vue";
 import SvgArrow from "@/components/SvgArrow.vue";
 import anime from 'animejs'
-const d3_dag = require("d3-dag");
-
-type LinkMap = {
-  [key: string]: {
-    [key: string]: D.GrabLink
-  }
-};
 
 function makeGrabNode(overwrite: Partial<D.GrabNode> = {}) {
   return {
@@ -131,108 +131,6 @@ function makeGrabNode(overwrite: Partial<D.GrabNode> = {}) {
   }
 }
 
-function topological_sort(nodes: D.GrabNode[], link_map: LinkMap, reverse_link_map: LinkMap) {
-  const node_map = _.keyBy(nodes, n => n.id);
-  const sorted: D.GrabNode[] = [];
-  const reverse_link_count = _.mapValues(reverse_link_map, v => Object.keys(v).length);
-  let froms: D.GrabNode[] = nodes.filter(n => !reverse_link_count[n.id]);
-  for(let i = 0; i < nodes.length; ++i) {
-    const f = froms.shift();
-    if (!f) { break; }
-    sorted.push(f);
-    if (!link_map[f.id]) { continue; }
-    _.each(link_map[f.id], (link, t) => {
-      reverse_link_count[t] -= 1;
-      if (reverse_link_count[t]) { return; }
-      froms.push(node_map[t]);
-    });
-  }
-  return sorted;
-}
-
-function align(sorted_nodes: D.GrabNode[], link_map: LinkMap, reverse_link_map: LinkMap) {
-  const node_map = _.keyBy(sorted_nodes, n => n.id);
-  const stack: {
-    [key: string]: {
-      node: D.GrabNode;
-      from?: D.GrabNode;
-      x: number;
-      y: number;
-    }
-  } = {};
-  let tx = 0;
-  let ty = 0;
-  sorted_nodes.forEach(n => {
-    if (!reverse_link_map[n.id]) {
-      stack[n.id] = { node: n, x: 0, y: ty };
-      ty += 1;
-    } else {
-      const fid = _.maxBy(Object.keys(reverse_link_map[n.id]), fid => stack[fid]!.x)!;
-      const x = stack[fid]!.x + 1;
-      if (x === tx) {
-        ty += 1;
-      } else {
-        ty = 0;
-      }
-      tx = x;
-      stack[n.id] = {
-        node: n,
-        from: node_map[fid],
-        x,
-        y: ty,
-      };
-    }
-  });
-  return stack;
-}
-
-function align_by_d3_dag(sorted_nodes: D.GrabNode[], link_map: LinkMap, reverse_link_map: LinkMap) {
-  const dagger = d3_dag.dagStratify();
-  const dag = dagger(
-    sorted_nodes.map(n => ({
-      id: n.id,
-      parentIds: Object.keys(reverse_link_map[n.id] || {}),
-    }))
-  );
-  let xmin = Infinity;
-  let ymin = Infinity;
-  let xmax = -Infinity;
-  let ymax = -Infinity;
-  sorted_nodes.forEach(n => {
-    if (n.x < xmin) { xmin = n.x }
-    if (n.y < ymin) { ymin = n.y }
-    if (xmax < n.x) { xmax = n.x }
-    if (ymax < n.y) { ymax = n.y }
-  });
-  const layouter = d3_dag.sugiyama(dag).nodeSize([60, 60]);
-  layouter(dag);
-
-  let xmin2 = Infinity;
-  let ymin2 = Infinity;
-  let xmax2 = -Infinity;
-  let ymax2 = -Infinity;
-  const layout_map: { [key: string]: any } = {};
-  function digger(node: any) {
-    if (_.isArray(node.children)) {
-      node.children.forEach(digger);
-    }
-    if (node.x < xmin2) { xmin2 = node.x }
-    if (node.y < ymin2) { ymin2 = node.y }
-    if (xmax2 < node.x) { xmax2 = node.x }
-    if (ymax2 < node.y) { ymax2 = node.y }
-    layout_map[node.id] = { x: node.x,  y: node.y };
-  }
-  digger(dag)
-  const dw = xmax - xmin;
-  const dh = ymax - ymin;
-  console.log({ xmin, ymin, xmax, ymax })
-  _.each(layout_map, (d, id) => {
-    d.x += -xmin2 + xmin;
-    d.y += -ymin2 + ymin;
-  });
-  return layout_map;
-}
-
 const nodeMinimum = {
   width: 30,
   height: 30,
@@ -244,6 +142,45 @@ const nodeMinimum = {
   }
 })
 export default class Draggable extends Vue {
+
+  @Prop() user!: firebase.User | null;
+  @Prop() dag_id!: string;
+  dag: D.GrabDAG | null = null
+
+  @Watch("user")
+  @Watch("dag_id")
+  async fetch() {
+    console.log(this.user);
+    if (this.user && this.dag_id) {
+      const dag = await D.get_dag(this.user, this.dag_id);
+      if (dag) {
+        this.dag = dag as any;
+      } else {
+        this.dag = D.new_dag(this.dag_id);
+      }
+      this.nodes = this.dag!.nodes;
+      this.link_map = this.dag!.links;
+      this.link_dictionary = {};
+      _(this.link_map).values().flatMap(submap => _.values(submap)).value().forEach(link => {
+        this.$set(this.link_dictionary, link.id, link);
+      })
+      this.flush_node_status_map()
+      this.update_all_links()
+      return;
+    }
+    this.dag = null;
+    this.nodes = [];
+    this.link_map = {};
+    this.link_dictionary = {};
+    this.flush_node_status_map()
+    this.update_all_links()
+  }
+
+  mounted() {
+    this.fetch()
+  }
+
+
 
   indicator_message = "";
 
@@ -258,6 +195,8 @@ export default class Draggable extends Vue {
     const linking = this.selection_mode === "link";
     const overred = !!(this.over_node && this.over_node.id === node.id);
     const linkable_from_selected = linking && this.linkable_from_selected(node);
+    const is_source = !this.reverse_link_map[node.id];
+    const is_sink = !this.link_map[node.id];
     return {
       selected,
       overred,
@@ -268,6 +207,7 @@ export default class Draggable extends Vue {
       linkable_from_selected,
       not_linkable_from_selected: linking && !this.linkable_from_selected(node),
       link_targeted: !!(!selected && linkable_from_selected && overred),
+      source_sink: this.selected_node_id ? null : is_source ? "source" : is_sink ? "sink" : null,
     };
   }
   flush_node_status_map() {
@@ -281,6 +221,7 @@ export default class Draggable extends Vue {
   add_new_node(arg: any = {}) {
     const n = this.nodes.length;
     this.nodes.push(makeGrabNode(arg));
+    this.flush_node_status_map()
   }
 
   /**
@@ -389,7 +330,11 @@ export default class Draggable extends Vue {
     return true;
   }
 
+  // [Firebase I/O]
   private initiate() {
+    this.dag = D.new_dag()
+    this.nodes = this.dag.nodes;
+    this.link_map = this.dag.links;
     const N = 30;
     const R = N * 50 * 1.2 / 2 / Math.PI;
     const L = 10;
@@ -412,8 +357,36 @@ export default class Draggable extends Vue {
     this.flush_node_status_map()
   }
 
-  mounted() {
-    this.initiate()
+  get dag_savable() { return !!this.dag && !!this.user; }
+  dag_saving = false;
+
+  async dag_save() {
+    if (!this.user) { return }
+    if (!this.dag) { return }
+    if (this.dag_saving) { return }
+    try {
+      this.dag_saving = true;
+      this.dag.nodes = this.nodes;
+      this.dag.links = this.link_map;
+      await D.post_dag(this.user, this.dag);
+    } catch (e) {
+      console.error(e);
+    }
+    this.dag_saving = false;
+  }
+
+  async dag_load() {
+    if (!this.user) { return }
+    if (!confirm("前回の保存より後の編集結果を取り消し、サーバに保存されている状態に戻します")) { return }
+    if (!this.dag) { return }
+    if (this.dag_saving) { return }
+    try {
+      this.dag_saving = true;
+      await this.fetch()
+    } catch (e) {
+      console.error(e);
+    }
+    this.dag_saving = false;
   }
 
   get self_bind() {
@@ -450,8 +423,8 @@ export default class Draggable extends Vue {
 
     const r = Math.pow(c2.x - c1.x, 2) + Math.pow(c2.y - c1.y, 2);
     if (!r) { return {} }
-    const cp1 = D.collision_point({ c1: c2, c2: c1 }, node_from);
-    const cp2 = D.collision_point({ c1, c2 }, node_to);
+    const cp1 = D.collision_point({ from: c2, to: c1 }, node_from);
+    const cp2 = D.collision_point({ from: c1, to: c2 }, node_to);
     if (!cp1 || !cp2) { return {} }
     const rp = Math.pow(cp2.x - cp1.x, 2) + Math.pow(cp2.y - cp1.y, 2);
     if (!rp) { return {} }
@@ -801,7 +774,7 @@ export default class Draggable extends Vue {
 
   link_dictionary: { [key: string]: D.GrabLink } = {}
 
-  link_map: LinkMap = {};
+  link_map: D.LinkMap = {};
 
   update_all_links() {
     _.each(this.link_map, (submap, fid) => {
@@ -869,9 +842,9 @@ export default class Draggable extends Vue {
   async align_nodes() {
     try {
       let t = 0;
-      const sorted = topological_sort(this.nodes, this.link_map, this.reverse_link_map);
+      const sorted = D.topological_sort(this.nodes, this.link_map, this.reverse_link_map);
       const index_map: { [key: string]: number } = {};
-      const layout_map = align_by_d3_dag(sorted, this.link_map, this.reverse_link_map);
+      const layout_map = D.align_by_d3_dag(sorted, this.link_map, this.reverse_link_map);
       _.sortBy(sorted, n => layout_map[n.id].y).forEach((n,i) => index_map[n.id] = i);
       const displacement = _(sorted).map((n,i) => {
         const layout = layout_map[n.id];
@@ -942,7 +915,6 @@ export default class Draggable extends Vue {
 .panel
   flex-shrink 0
   flex-grow 0
-  display flex
 .indicator
   flex-shrink 0
   flex-grow 0
