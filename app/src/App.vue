@@ -1,146 +1,106 @@
 <template lang="pug">
 v-app#app
-  v-navigation-drawer(v-model="drawer" :mini-variant.sync="mini" app light stateless)
+  v-navigation-drawer(v-model="navState.drawer" :mini-variant.sync="navState.mini" app light stateless)
     v-list.pt-0(dense)
-      v-list-item(@click.stop="mini = true; go('/f')")
+      v-list-item(@click.stop="navState.mini = true; go('/f')")
         v-list-item-icon
           v-icon format_list_bulleted
-      v-list-item(@click.stop="mini = true; go('/d')")
+      v-list-item(@click.stop="navState.mini = true; go('/d')")
         v-list-item-icon
           v-icon share
-      v-list-item(@click.stop="mini = true; go('/ldag')")
+      v-list-item(@click.stop="navState.mini = true; go('/ldag')")
         v-list-item-icon
           v-icon touch_app
-      v-list-item(@click.stop="show_user = true")
+      v-list-item(@click.stop="navState.show_user = true")
         v-list-item-icon
           v-icon person
         v-list-item-content
           v-list-item-title User
 
-  v-content.content
+  v-main.content
     keep-alive
-      router-view(v-on:snackon="pop_snackbar" :user="user" :authstate="authstate")
+      router-view(v-on:snackon="pop_snackbar" :auth_state="auth_state")
 
   v-snackbar.snackbar(v-model="snackbar.on" :timeout="snackbar.timeout" multi-line=true :color="snackbar.cssclass" bottom)
     = "{{ snackbar.text }}"
     v-btn(dark depressed @click="snackbar.on = false") 閉じる
 
-  v-dialog(v-model="show_user" max-width=800 style="z-index: 10000;")
+  v-dialog(v-model="navState.show_user" max-width=800 style="z-index: 10000;")
     v-card.user
       form
         v-card-title 
           h3 ユーザアカウント
         v-card-text(style="text-align:left;")
-          .logout(v-if="user")
-            h4 ログイン中: {{ user.email }}
+          .logout(v-if="auth_state.user")
+            h4 ログイン中: {{ auth_state.user.email }}
           .login(v-else)
             h4 ログイン
-            v-text-field(v-model="user_mail" type="mail" label="メールアドレス" placeholder="xxxx@example.com")
-            v-text-field(v-model="user_password" type="password" label="パスワード")
+            v-text-field(v-model="user_login_state.mail" type="mail" label="メールアドレス" placeholder="xxxx@example.com")
+            v-text-field(v-model="user_login_state.password" type="password" label="パスワード")
         v-card-actions
-          v-btn(@click="show_user = false") 閉じる
-          template(v-if="user")
-            v-btn(:loading="user_working" :disabled="user_working" @click="logout" color="blue primary") ログアウト
+          v-btn(@click="navState.show_user = false") 閉じる
+          template(v-if="auth_state.user")
+            v-btn(:loading="user_login_state.working" :disabled="user_login_state.working" @click="logout" color="blue primary") ログアウト
           template(v-else)
-            v-btn(:loading="user_working" :disabled="user_working" @click="login" color="blue primary") ログイン
+            v-btn(:loading="user_login_state.working" :disabled="user_login_state.working" @click="login" color="blue primary") ログイン
 
 </template>
 
 <script lang="ts">
-import { Prop, Component, Vue } from 'vue-property-decorator';
 import firebase from "firebase";
+import { reactive, ref, Ref, SetupContext, defineComponent, onMounted, } from '@vue/composition-api';
+import * as Auth from "@/models/auth";
 
-@Component({
-  components: {
-  }
-})
-export default class App extends Vue {
+const useNav = (context: SetupContext) => {
+  const navState = reactive({
+    drawer: true,
+    mini: true,
+    show_user: false,
+  });
 
-  drawer = true
-  mini: boolean = true
-  snackbar: {
-    on: boolean
-    timeout: number
-    text: string
-    cssclass: string
-  } = {
+  const snackbar = reactive({
     on: false,
     timeout: 3000,
     text: "",
     cssclass: "",
-  }
-  show_user = false
+  });
 
-  pop_snackbar(payload: { text: string, cssclass?: string }) {
+  function pop_snackbar(payload: { text: string, cssclass?: string }) {
     console.log(payload)
-    this.snackbar.text = payload.text
-    this.snackbar.cssclass = payload.cssclass || ""
-    this.snackbar.on = true
+    snackbar.text = payload.text
+    snackbar.cssclass = payload.cssclass || ""
+    snackbar.on = true
   }
 
-  go(path: string) {
-    console.log(path, this.mini)
-    this.$router.push(path)
+  function go(path: string) {
+    context.root.$router.push(path)
   }
 
+  return {
+    navState,
+    snackbar,
+    pop_snackbar,
+    go,
+  };
+};
 
-  mounted() {
-    console.log(this.$root)
-    this.userObserver()
-  }
+export default defineComponent({
 
-  user: firebase.User | null = null
-  authstate: "Authenticated" | "Unauthenticated" | "Unknown" = "Unknown"
-  observing = false
-  userObserver() {
-    if (this.observing) { return; }
-    this.observing = true;
-    firebase.auth().onAuthStateChanged((user: firebase.User | null) => {
-      if (user) {
-        this.authstate = "Authenticated";
-        this.user = user;
-      } else {
-        this.authstate = "Unauthenticated";
-        this.user = null;
-      }
-    });
-  }
+  setup(props: {}, ctx: SetupContext) {
+    console.log(props, ctx);
+    const userAuth = Auth.useUserAuth(ctx);
 
-  user_mail = ""
-  user_password = ""
-  user_working = false
-  async login() {
-    if (this.user || this.user_working) { return; }
-    try {
-      const mail = (this.user_mail || "").trim();
-      const password = (this.user_password || "").trim();
-      console.log({ mail, password });
-      if (!mail || !password) { return; }
-      this.user_working = true;
-      const userCredential = await firebase.auth().signInWithEmailAndPassword(mail, password);
-      console.log(userCredential);
-      this.pop_snackbar({ text: "ログインしました" });
-    } catch (e) {
-      console.error(e);
-      this.pop_snackbar({ text: "失敗しました" });
+    onMounted(() => {
+      userAuth.observeUser()
+    })
+
+    return {
+      ...useNav(ctx),
+      ...userAuth,
     }
-    this.user_working = false;
   }
+});
 
-  async logout() {
-    if (!this.user || this.user_working) { return; }
-    try {
-      this.user_working = true;
-      await firebase.auth().signOut()
-      this.pop_snackbar({ text: "ログアウトしました" });
-    } catch (e) {
-      console.error(e);
-      this.pop_snackbar({ text: "失敗しました" });
-    }
-    this.user_working = false;
-  }
-
-}
 </script>
 
 <style lang="stylus">

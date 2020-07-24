@@ -1,17 +1,18 @@
 import * as _ from "lodash";
-import firebase, { firestore, auth } from "firebase";
+import firebase from "firebase";
 import * as uuid from "uuid";
 import * as U from "@/util";
 
+type ObjectBase = {
+  id: string;
+  created_at: number;
+  updated_at: number;
+}
 type ListerStatus = "idling" | "working";
 /**
  * Firebase collection I/O
  */
-export class FirestoreObjectLister<T extends { 
-  id: string;
-  created_at: number;
-  updated_at: number;
-}> {
+export class ObjectLister<T extends ObjectBase> {
   /**
    * 保存ステータス
    */
@@ -97,3 +98,68 @@ export class FirestoreObjectLister<T extends {
       }));
   }
 }
+
+import { reactive, SetupContext } from '@vue/composition-api';
+import * as Auth from "@/models/auth";
+
+export const useObjectLister = <ObjectType extends ObjectBase>(
+  context: SetupContext,
+  listerGenerator: (user: Auth.User) => ObjectLister<ObjectType>
+  ) => {
+  const lister: {
+    lister: ObjectLister<ObjectType> | null;
+    unsubscriber: () => void;
+    items: ObjectType[];
+  } = reactive({
+    lister: null,
+    unsubscriber: () => 1,
+    items: [],
+  });
+
+  return {
+    lister,
+
+    changed_user: async (auth_state: Auth.AuthState) => {
+      if (auth_state.user) {
+        // -- lister --
+        // setup
+        lister.lister = listerGenerator(auth_state.user);
+        lister.lister.option.snapshotCallback = (change) => {
+          const { doc, object } = change;
+          // console.log(`[!!] ${change.type} ${change.object.id}`)
+          switch (change.type) {
+          case "added":
+          case "modified":
+            (() => {
+              const i = lister.items.findIndex((d) => d.id === doc.id)
+              if (0 <= i) {
+                lister.items.splice(i, 1, object);
+              } else {
+                lister.items.splice(0, 0, object);
+              }
+            })()
+            break;
+          case "removed":
+            (() => {
+              const i = lister.items.findIndex((d) => d.id === doc.id);
+              if (0 <= i) {
+                lister.items.splice(i, 1);
+              }
+            })();
+            break;
+          }
+        };
+
+        // fetch
+        (await lister.lister.fetch()).forEach((d) => lister.items.push(d));
+        lister.unsubscriber = lister.lister.snapshot();
+        console.log("snapshotting")
+      } else {
+        if (lister.unsubscriber) { lister.unsubscriber() }
+        lister.lister = null;
+        lister.items = [];
+      }
+    },
+  };
+};
+

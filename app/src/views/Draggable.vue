@@ -26,8 +26,7 @@
             )
             g.linker(v-if="selection_mode === 'link' && selected_node && anchored_point")
                 SvgArrow(
-                  :x1="selected_node.x + selected_node.width/2" :y1="selected_node.y + selected_node.height/2"
-                  :x2="anchored_point.x" :y2="anchored_point.y" stroke="red"
+                  :status="{ x1: selected_node.x + selected_node.width/2, y1: selected_node.y + selected_node.height/2, x2: anchored_point.x, y2: anchored_point.y, stroke: 'red' }"
                 )
 
 
@@ -117,6 +116,7 @@ import * as D from "@/models/draggable";
 import SvgGrabNode from "@/components/SvgGrabNode.vue";
 import SvgArrow from "@/components/SvgArrow.vue";
 import anime from 'animejs'
+import * as Auth from "@/models/auth";
 
 function makeGrabNode(overwrite: Partial<D.GrabNode> = {}) {
   return {
@@ -143,16 +143,16 @@ const nodeMinimum = {
 })
 export default class Draggable extends Vue {
 
-  @Prop() user!: firebase.User | null;
+  @Prop() auth_state!: Auth.AuthState
   @Prop() dag_id!: string;
   dag: D.GrabDAG | null = null
 
-  @Watch("user")
+  @Watch("auth_state.user")
   @Watch("dag_id")
   async fetch() {
-    console.log(this.user);
-    if (this.user && this.dag_id) {
-      const dag = await D.get_dag(this.user, this.dag_id);
+    console.log(this.auth_state.user);
+    if (this.auth_state.user && this.dag_id) {
+      const dag = await D.get_dag(this.auth_state.user, this.dag_id);
       if (dag) {
         this.dag = dag as any;
       } else {
@@ -357,18 +357,18 @@ export default class Draggable extends Vue {
     this.flush_node_status_map()
   }
 
-  get dag_savable() { return !!this.dag && !!this.user; }
+  get dag_savable() { return !!this.dag && !!this.auth_state.user; }
   dag_saving = false;
 
   async dag_save() {
-    if (!this.user) { return }
+    if (!this.auth_state.user) { return }
     if (!this.dag) { return }
     if (this.dag_saving) { return }
     try {
       this.dag_saving = true;
       this.dag.nodes = this.nodes;
       this.dag.links = this.link_map;
-      await D.post_dag(this.user, this.dag);
+      await D.post_dag(this.auth_state.user, this.dag);
     } catch (e) {
       console.error(e);
     }
@@ -376,7 +376,7 @@ export default class Draggable extends Vue {
   }
 
   async dag_load() {
-    if (!this.user) { return }
+    if (!this.auth_state.user) { return }
     if (!confirm("前回の保存より後の編集結果を取り消し、サーバに保存されている状態に戻します")) { return }
     if (!this.dag) { return }
     if (this.dag_saving) { return }
@@ -438,13 +438,15 @@ export default class Draggable extends Vue {
       stroke: "#666",
     };
     return {
-      name: anchor.id,
-      x1: cp1.x,
-      y1: cp1.y,
-      x2: cp2.x,
-      y2: cp2.y,
-      arrowheadPosition: 0.8,
-      ...stroke_attr,
+      status: {
+        name: anchor.id,
+        x1: cp1.x,
+        y1: cp1.y,
+        x2: cp2.x,
+        y2: cp2.y,
+        arrowheadPosition: 0.8,
+        ...stroke_attr,
+      }
     };
   }
 

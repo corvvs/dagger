@@ -6,9 +6,9 @@ g.node(
       x="0" y="0"
       :width="node.width" :height="node.height"
       draggable
-      @mousedown.stop="mdn_body($event)"
-      @mouseenter.stop="men($event)"
-      @mouseleave.stop="mle($event)"
+      @mousedown.stop="mouseDownBody($event)"
+      @mouseEnter.stop="mouseEnter($event)"
+      @mouseleave.stop="mouseLeave($event)"
       @click="$emit('click', $event)"
     )
   text(transform="translate(4,20)") {{ node.title }}
@@ -18,7 +18,7 @@ g.node(
       :class="rb.resizeMode" :x="rb.x" :y="rb.y"
       :width="rb.width" :height="rb.height"
       fill="#111" stroke="none" draggable
-      @mousedown.stop="mdn_resizer($event, rb.resizeMode)"
+      @mousedown.stop="mouseDownResizer($event, rb.resizeMode)"
     )
   g.link_target(v-if="status.link_targeted")
     rect.link_target_rect(
@@ -31,101 +31,98 @@ g.node(
 
 <script lang="ts">
 import _ from "lodash";
+import { reactive, ref, Ref, SetupContext, defineComponent, onMounted, PropType, watch, computed } from '@vue/composition-api';
 import { Prop, Component, Vue } from 'vue-property-decorator';
 import * as D from "@/models/draggable";
 
 const edgeWidth = 5;
 
-@Component({
-  components: {
-  }
-})
-export default class SvgGrabNode extends Vue {
-  @Prop() node!: D.GrabNode;
-  @Prop() status!: D.GrabNodeStatus;
+export default defineComponent({
+  props: {
+    node: {
+      type: Object as PropType<D.GrabNode>,
+      required: true,
+    },
+    status: {
+      type: Object as PropType<D.GrabNodeStatus>,
+      required: true,
+    },
+  },
 
-  get resizer_binds() {
-    const node = this.node;
-    return [
-      { resizeMode: "n",  x: node.width/2 - edgeWidth, y: -edgeWidth },
-      { resizeMode: "nw", x: -edgeWidth,               y: -edgeWidth },
-      { resizeMode: "w",  x: -edgeWidth,               y: node.height/2 - edgeWidth },
-      { resizeMode: "sw", x: -edgeWidth,               y: node.height - edgeWidth },
-      { resizeMode: "s",  x: node.width/2 - edgeWidth, y: node.height - edgeWidth },
-      { resizeMode: "se", x: node.width - edgeWidth,   y: node.height - edgeWidth },
-      { resizeMode: "e",  x: node.width - edgeWidth,   y: node.height/2 - edgeWidth },
-      { resizeMode: "ne", x: node.width - edgeWidth,   y: -edgeWidth },
-    ].map(d => ({ ...d, width: 2 * edgeWidth, height: 2 * edgeWidth }))
-  }
+  setup(prop: {
+    node: D.GrabNode;
+    status: D.GrabNodeStatus;
+  }, context: SetupContext) {
+    return {
+      resizer_binds: computed(() => {
+        const node = prop.node;
+        return [
+          { resizeMode: "n",  x: node.width/2 - edgeWidth, y: -edgeWidth },
+          { resizeMode: "nw", x: -edgeWidth,               y: -edgeWidth },
+          { resizeMode: "w",  x: -edgeWidth,               y: node.height/2 - edgeWidth },
+          { resizeMode: "sw", x: -edgeWidth,               y: node.height - edgeWidth },
+          { resizeMode: "s",  x: node.width/2 - edgeWidth, y: node.height - edgeWidth },
+          { resizeMode: "se", x: node.width   - edgeWidth, y: node.height - edgeWidth },
+          { resizeMode: "e",  x: node.width   - edgeWidth, y: node.height/2 - edgeWidth },
+          { resizeMode: "ne", x: node.width   - edgeWidth, y: -edgeWidth },
+        ].map(d => ({ ...d, width: 2 * edgeWidth, height: 2 * edgeWidth }))
+      }),
 
-  get node_bind() {
-    const node = this.node;
-    const r: any = {
-      class: [],
-      transform: `translate(${node.x},${node.y})`,
-    };
-    if (this.status.selected) {
-      r.class.push("selected");
-    } else if (this.status.reachable_from_selected) {
-      r.class.push("reachable-from-selected")
-    } else if (this.status.reachable_to_selected) {
-      r.class.push("reachable-to-selected")
-    }
-    if (!this.status.selected && this.status.not_linkable_from_selected) {
-      r.class.push("not_linkable_from_selected")
-    }
-    if (this.status.overred) {
-      r.class.push("over");
-      if (this.status.selected && !this.status.linkable_from_selected) {
-        r.class.push("nonlinkable")
-      }
-    }
-    if (this.status.source_sink) {
-      r.class.push(`${this.status.source_sink}`);
-    }
-    return r;
-  }
+      node_bind: computed(() => {
+        const node = prop.node;
+        const r: any = {
+          class: [],
+          transform: `translate(${node.x},${node.y})`,
+        };
+        if (prop.status.selected) {
+          r.class.push("selected");
+        } else if (prop.status.reachable_from_selected) {
+          r.class.push("reachable-from-selected")
+        } else if (prop.status.reachable_to_selected) {
+          r.class.push("reachable-to-selected")
+        }
+        if (!prop.status.selected && prop.status.not_linkable_from_selected) {
+          r.class.push("not_linkable_from_selected")
+        }
+        if (prop.status.overred) {
+          r.class.push("over");
+          if (prop.status.selected && !prop.status.linkable_from_selected) {
+            r.class.push("nonlinkable")
+          }
+        }
+        if (prop.status.source_sink) {
+          r.class.push(`${prop.status.source_sink}`);
+        }
+        return r;
+      }),
 
-  /**
-   * MouseDown(Body)
-   * -> grabMouseDownBody
-   */
-  mdn_body(event: MouseEvent) {
-    const node = this.node;
-    this.$emit("grabMouseDownBody", { event, node });
-  }
+      // handlers
+      mouseDownBody(event: MouseEvent) {
+        const node = prop.node;
+        context.emit("grabMouseDownBody", { event, node });
+      },
 
-  /**
-   * MouseDown(Resizer)
-   * -> grabMouseDownResizer
-   */
-  mdn_resizer(event: MouseEvent, resizeMode: D.ResizeMode) {
-    const node = this.node;
-    this.$emit("grabMouseDownResizer", { event, node, resizeMode });
-  }
+      mouseDownResizer(event: MouseEvent, resizeMode: D.ResizeMode) {
+        const node = prop.node;
+        context.emit("grabMouseDownResizer", { event, node, resizeMode });
+      },
 
-  /**
-   * MouseEnter
-   * -> grabMouseEnter
-   */
-  men(event: MouseEvent) {
-    const node = this.node;
-    if (!this.status.overred) {
-      this.$emit("grabMouseEnter", { event, node });
-    }
-  }
+      mouseEnter(event: MouseEvent) {
+        const node = prop.node;
+        if (!prop.status.overred) {
+          context.emit("grabMouseEnter", { event, node });
+        }
+      },
 
-  /**
-   * MouseLeave
-   * -> grabMouseLeave
-   */
-  mle(event: MouseEvent) {
-    const node = this.node;
-    if (this.status.overred) {
-      this.$emit("grabMouseLeave", { event, node });
+      mouseLeave(event: MouseEvent) {
+        const node = prop.node;
+        if (prop.status.overred) {
+          context.emit("grabMouseLeave", { event, node });
+        }
+      },
     }
   }
-}
+});
 </script>
 
 

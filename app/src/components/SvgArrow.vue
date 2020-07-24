@@ -1,101 +1,107 @@
 <template lang="pug">
 g.sharp-arrow(v-if="showable")
-  line.body(
-    v-bind="arrow_bind"
-  )
-  line.head(
-    v-bind="arrowhead_bind.u"
-  )
-  line.head(
-    v-bind="arrowhead_bind.d"
-  )
-  
+  line.body(v-bind="arrow_bind")
+  line.head(v-bind="arrowhead_bind.u")
+  line.head(v-bind="arrowhead_bind.d")
 </template>
 
 <script lang="ts">
 import _ from "lodash";
-import { Prop, Component, Vue } from 'vue-property-decorator';
+import { reactive, ref, Ref, SetupContext, defineComponent, onMounted, PropType, watch, computed } from '@vue/composition-api';
 
 const defaults = {
   arrowLength: 12,
   arrowAngle: 30,
 };
 
-@Component({
-  components: {
-  }
-})
-export default class SvgArrow extends Vue {
-  @Prop() name?: string;
-  @Prop() x1!: number;
-  @Prop() y1!: number;
-  @Prop() x2!: number;
-  @Prop() y2!: number;
+type ArrowStatus = {
+  name?: string;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
 
-  @Prop() arrowLength?: number;
-  @Prop() arrowAngle?: number;
-  @Prop() arrowheadPosition?: number; // 0 ~ 1, 0 = from, 1 = to
+  arrowLength?: number;
+  arrowAngle?: number;
+  arrowheadPosition?: number; // 0 ~ 1, 0 = from, 1 = to
 
-  @Prop() stroke?: string;
-  @Prop() stroke_width?: number;
+  stroke?: string;
+  stroke_width?: number;
+};
 
-  get showable() {
-    return [this.x1, this.y1, this.x2, this.y2].every(v => _.isFinite(v)) && !(this.x1 === this.x2 && this.y1 === this.y2)
-  }
+export default defineComponent({
+  props: {
+    status: {
+      type: Object as PropType<ArrowStatus>,
+    },
+  },
 
-  get arrow_bind() {
+  setup(prop: {
+    status: ArrowStatus;
+  }, context: SetupContext) {
+    const arrow_angle = computed(() => {
+      const status = prop.status;
+      return (_.isFinite(status.arrowAngle) ? status.arrowAngle! : defaults.arrowAngle) * Math.PI / 180;
+    });
+    const arrow_length = computed(() => {
+      const status = prop.status;
+      return _.isFinite(status.arrowLength) ? status.arrowLength! : defaults.arrowLength;
+    });
+    const arrow_headposition = computed(() => {
+      const status = prop.status;
+      return _.isFinite(status.arrowheadPosition) ? status.arrowheadPosition! : 1;
+    });
     return {
-      x1: this.x1, y1: this.y1,
-      x2: this.x2, y2: this.y2,
-      stroke: this.stroke,
-      stroke_width: this.stroke_width,
+      showable: computed(() => {
+        const status = prop.status;
+        return [status.x1, status.y1, status.x2, status.y2].every(v => _.isFinite(v)) && !(status.x1 === status.x2 && status.y1 === status.y2)
+      }),
+      arrow_bind: computed(() => {
+        const status = prop.status;
+        return {
+          x1: status.x1, y1: status.y1,
+          x2: status.x2, y2: status.y2,
+          stroke: status.stroke,
+          stroke_width: status.stroke_width,
+        };
+      }),
+
+      arrowhead_bind: computed(() => {
+        const status = prop.status;
+        const vx = (status.x1 - status.x2);
+        const vy = (status.y1 - status.y2);
+        const angle = arrow_angle.value;
+        const length = arrow_length.value;
+        const r = length / Math.sqrt(Math.pow(vx, 2) + Math.pow(vy, 2));
+        const dx = vx * r, dy = vy * r;
+        const xc = dx * Math.cos(angle); const ys = dy * Math.sin(angle);
+        const xs = dx * Math.sin(angle); const yc = dy * Math.cos(angle);
+        const left_x2 = +xc - ys;
+        const left_y2 = +xs + yc;
+        const right_x2 = +xc + ys;
+        const right_y2 = -xs + yc;
+        // console.log(status.x1, status.y1, status.x2, status.y2, r, ux2, uy2)
+        const head_x = vx * (1 - arrow_headposition.value), head_y = vy * (1 - arrow_headposition.value);
+        return {
+          u: {
+            x1: 0, y1: 0,
+            x2: left_x2, y2: left_y2,
+            stroke: status.stroke,
+            stroke_width: status.stroke_width,
+            transform: `translate(${status.x2 + head_x},${status.y2 + head_y})`,
+          },
+          d: {
+            x1: 0, y1: 0,
+            x2: right_x2, y2: right_y2,
+            stroke: status.stroke,
+            stroke_width: status.stroke_width,
+            transform: `translate(${status.x2 + head_x},${status.y2 + head_y})`,
+          },
+        };
+      }),
     };
   }
-
-  get arrow_angle() { return (_.isFinite(this.arrowAngle) ? this.arrowAngle! : defaults.arrowAngle) * Math.PI / 180; }
-  get arrow_length() { return _.isFinite(this.arrowLength) ? this.arrowLength! : defaults.arrowLength; }
-  get arrow_string() { return 2 * this.arrow_length / Math.sin(this.arrow_angle); }
-  get arrow_headposition() { return _.isFinite(this.arrowheadPosition) ? this.arrowheadPosition! : 1; }
-
-  get arrowhead_bind()  {
-    const r = Math.sqrt(Math.pow(this.x1 - this.x2, 2) + Math.pow(this.y1 - this.y2, 2));
-    const angle = this.arrow_angle;
-    const length = this.arrow_length;
-    const vx = (this.x1 - this.x2);
-    const vy = (this.y1 - this.y2);
-    const dx = vx / r * length, dy = vy / r * length;
-    const ux2 = dx * Math.cos(+angle) - dy * Math.sin(+angle);
-    const uy2 = dx * Math.sin(+angle) + dy * Math.cos(+angle);
-    const dx2 = dx * Math.cos(-angle) - dy * Math.sin(-angle);
-    const dy2 = dx * Math.sin(-angle) + dy * Math.cos(-angle);
-    // console.log(this.x1, this.y1, this.x2, this.y2, r, ux2, uy2)
-    const x1 = vx * (1 - this.arrow_headposition), y1 = vy * (1 - this.arrow_headposition);
-    return {
-      u: {
-        x1: 0, y1: 0,
-        x2: ux2, y2: uy2,
-        stroke: this.stroke,
-        stroke_width: this.stroke_width,
-        transform: `translate(${this.x2 + x1},${this.y2 + y1})`,
-      },
-      d: {
-        x1: 0, y1: 0,
-        x2: dx2, y2: dy2,
-        stroke: this.stroke,
-        stroke_width: this.stroke_width,
-        transform: `translate(${this.x2 + x1},${this.y2 + y1})`,
-      },
-    };
-  }
-
-  // beforeUpdate() {
-  //   console.log("beforeUpdate", this.name)
-  // }
-
-  // updated() {
-  //   console.log("updated", this.name)
-  // }
-}
+});
 </script>
 
 <style scoped lang="stylus">

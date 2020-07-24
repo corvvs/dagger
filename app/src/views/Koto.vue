@@ -81,6 +81,7 @@ import * as F from "@/models/koto"
 import { Marked, MarkedOptions } from 'marked-ts'
 import { extend, ValidationProvider, ValidationObserver } from 'vee-validate';
 import { required } from 'vee-validate/dist/rules';
+import * as Auth from "@/models/auth";
 extend('required', required);
 
 @Component({
@@ -89,6 +90,8 @@ extend('required', required);
   }
 })
 export default class Koto extends Vue {
+
+  @Prop() auth_state!: Auth.AuthState
 
   // -- util --
   timeout(epoch_ms: number, format: string) {

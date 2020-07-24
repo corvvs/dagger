@@ -26,7 +26,7 @@ export type DeletedKoto = {
 };
 
 type KotoError = Partial<Record<keyof Koto, string>>;
-export type KotoLister = FB.FirestoreObjectLister<Koto>;
+export type KotoLister = FB.ObjectLister<Koto>;
 
 const storageKey = "dagger_test_kotos";
 export namespace Koto {
@@ -47,7 +47,7 @@ export namespace Koto {
   }
 
   export function lister(uid: string)  {
-    return new FB.FirestoreObjectLister<Koto>(koto_collection(uid));
+    return new FB.ObjectLister<Koto>(koto_collection(uid));
   }
 
   export function copy(object: Koto) {

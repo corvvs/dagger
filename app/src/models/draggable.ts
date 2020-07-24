@@ -1,8 +1,9 @@
 import _ from "lodash";
-import firebase, { firestore, auth } from "firebase";
+import { firestore } from "firebase";
 import * as uuid from "uuid";
 import * as U from "@/util";
 import * as FB from "@/models/fb";
+import * as Auth from "@/models/auth";
 
 const dag_version = "0.0.1";
 
@@ -76,9 +77,9 @@ export type GrabDAG = {
 
 export type GrabDAGHead = Omit<GrabDAG, "nodes" | "links">;
 
-export type DAGHeadLister = FB.FirestoreObjectLister<GrabDAGHead>;
-export function spawn_lister(user: firebase.User) {
-  return new FB.FirestoreObjectLister<GrabDAGHead>(firestore().collection(`user/${user.uid}/dag_head`));
+export type DAGHeadLister = FB.ObjectLister<GrabDAGHead>;
+export function spawn_lister(user: Auth.User) {
+  return new FB.ObjectLister<GrabDAGHead>(firestore().collection(`user/${user.uid}/dag_head`));
 }
 
 
@@ -182,14 +183,14 @@ export function new_dag(id?: string): GrabDAG {
   };
 }
 
-export function post_dag(user: firebase.User, dag: GrabDAG) {
+export function post_dag(user: Auth.User, dag: GrabDAG) {
   const now = Date.now();
   dag.created_at = dag.created_at || now;
   dag.updated_at = now;
   return firestore().collection(`user/${user.uid}/dag`).doc(dag.id).set(dag);
 }
 
-export async function get_dag(user: firebase.User, dag_id: string) {
+export async function get_dag(user: Auth.User, dag_id: string) {
   const doc = await firestore().collection(`user/${user.uid}/dag`).doc(dag_id).get();
   return doc.exists ? doc.data() : null;
 }

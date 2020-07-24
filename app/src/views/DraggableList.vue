@@ -7,8 +7,8 @@
       .time 作成
       .short_text タイトル
       .id ID
-    .item(v-for="item in items" :key="item.id" @click="view_item(item)")
-      .time {{ timeout(item.created_at, "YY/MM/DD hh:mm:ss") }}
+    .item(v-for="item in lister.items" :key="item.id" @click="view_item(item)")
+      .time {{ format_epoch(item.created_at, "YY/MM/DD hh:mm:ss") }}
       .short_text(:title="item.title") {{ item.title }}
       .id {{ item.id }}
 
@@ -18,88 +18,43 @@
 <script lang="ts">
 import * as _ from "lodash";
 import moment from "moment";
-import { Prop, Component, Vue, Watch } from 'vue-property-decorator';
-import firebase from "firebase";
+import { reactive, ref, Ref, SetupContext, defineComponent, onMounted, PropType, watch } from '@vue/composition-api';
 import * as D from "@/models/draggable"
+import * as Auth from "@/models/auth";
+import * as F from "@/formatter"
+import * as FB from "@/models/fb";
 
-@Component({
-  components: {
-  }
-})
-export default class DraggableList extends Vue {
+export default defineComponent({
+  props: {
+    auth_state: {
+      type: Object as PropType<Auth.AuthState>,
+      required: true,
+    },
+  },
 
-  // -- util --
-  timeout(epoch_ms: number, format: string) {
-    return moment(epoch_ms).format(format);
-  }
-
-
-
-  @Prop() user!: firebase.User | null
-  @Watch("user")
-  async changed_user() {
-    console.log(this.user);
-    if (this.user) {
-      this.lister = D.spawn_lister(this.user!);
-      // -- lister --
-      // setup
-      this.lister = D.spawn_lister(this.user!);
-      this.lister.option.snapshotCallback = (change) => {
-        const { doc, object } = change;
-        // console.log(`[!!] ${change.type} ${change.object.id}`)
-        switch (change.type) {
-        case "added":
-        case "modified":
-          (() => {
-            const i = this.items.findIndex((d) => d.id === doc.id)
-            if (0 <= i) {
-              this.items.splice(i, 1, object);
-            } else {
-              this.items.splice(0, 0, object);
-            }
-          })()
-          break;
-        case "removed":
-          (() => {
-            const i = this.items.findIndex((d) => d.id === doc.id);
-            if (0 <= i) {
-              this.items.splice(i, 1);
-            }
-          })();
-          break;
-        }
-      };
-
-      // fetch
-      (await this.lister.fetch()).forEach((d) => this.items.push(d));
-      this.unsubscriber = this.lister.snapshot();
-    } else {
-      if (this.unsubscriber) { this.unsubscriber() }
-      this.lister = null;
-      this.items = [];
-    }
-  }
-
-  mounted() {
-    if (this.user) {
-      this.changed_user()
-    }
-  }
-
-  // -- Kotos IO --
-  lister: D.DAGHeadLister | null = null;
-  unsubscriber!: () => void;
-  items: D.GrabDAGHead[] = [];
-
-  view_item(item: D.GrabDAGHead) {
-    this.$router.push(`/dag/${item.id}`)
-  }
-
-  new_item() {
-    const item = D.new_dag();
-    this.$router.push(`/dag/${item.id}`)
-  }
-}
+  setup(props: {
+    auth_state: Auth.AuthState;
+  }, context: SetupContext) {
+    const lister = FB.useObjectLister(context, user => D.spawn_lister(user));
+    onMounted(() => {
+      if (props.auth_state.user) {
+        lister.changed_user(props.auth_state)
+      }
+    });
+    watch(() => props.auth_state.user, () => lister.changed_user(props.auth_state))
+    return {
+      ...lister,
+      ...F.useFormatter(),
+      view_item: (item: D.GrabDAGHead) => {
+        context.root.$router.push(`/dag/${item.id}`)
+      },
+      new_item: () => {
+        const item = D.new_dag();
+        context.root.$router.push(`/dag/${item.id}`)
+      },
+    };
+  },
+});
 </script>
 
 <style scoped lang="stylus">
