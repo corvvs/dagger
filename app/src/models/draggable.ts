@@ -58,6 +58,10 @@ export type GrabArrow = {
   angle?: number;
 };
 
+export type NodeMap = {
+  [id: string]: GrabNode;
+};
+
 export type LinkMap = {
   [from: string]: {
     [to: string]: GrabLink
@@ -262,3 +266,141 @@ export function align_by_d3_dag(sorted_nodes: GrabNode[], link_map: LinkMap, rev
   });
   return layout_map;
 }
+
+export function survey_reachablility(origin_node: GrabNode, node_map: NodeMap, link_map: LinkMap) {
+  const reachable_node: { [key: string]: number } = {};
+  const neighboring_node: { [key: string]: GrabNode } = {};
+  const neighboring_link: { [key: string]: GrabLink } = {};
+  const connected_link: { [key: string]: GrabLink } = {};
+  let deps: { [key: string]: GrabNode } = { [origin_node.id]: origin_node };
+  let distance = 0;
+  while (Object.keys(deps).length > 0) {
+    distance += 1;
+    const d2: { [key: string]: GrabNode } = {};
+    for (const fid of Object.keys(deps)) {
+      // console.log(dir, fid, !!d2[fid])
+      if (d2[fid]) { continue; }
+      const submap = link_map[fid];
+      if (submap) {
+        for (const tid of Object.keys(submap)) {
+          const link = submap[tid];
+          const link_id = link.id;
+          if (distance === 1) {
+            neighboring_link[link_id] = link;
+            neighboring_node[tid] = node_map[tid];
+          }
+          connected_link[link_id] = link;
+          if (reachable_node[tid]) { continue }
+          d2[tid] = node_map[tid];
+        };
+      }
+    };
+    deps = d2;
+    _.each(deps, (node, id) => reachable_node[id] = distance);
+    // console.log(dir, Object.keys(deps));
+  }
+  // console.log(neighboring_link, connected_link)
+  return {
+    reachable_node,
+    neighboring_node,
+    neighboring_link,
+    connected_link,
+  };
+}
+
+export function linkable(from: GrabNode, to: GrabNode, link_map: LinkMap) {
+  if (from.id === to.id) { return false; }
+  // **現在のグラフはDAGであると仮定する**
+
+  // from -> to の辺があるとNG
+  // (経路はあってもよい)
+  if (link_map[from.id]) {
+    if (link_map[from.id][to.id]) {
+      return false;
+    }
+  }
+  // to -> from の経路があるとNG
+  // (もちろん辺もNG)
+  const visited: { [key: string]: boolean } = {};
+  let deps: { [key: string]: true } = { [to.id]: true };
+  while (Object.keys(deps).length > 0) {
+    const d2: { [key: string]: true } = {};
+    for (const fid of Object.keys(deps)) {
+      if (fid === from.id) { return false; }
+      if (visited[fid]) { continue; }
+      visited[fid] = true;
+      const submap = link_map[fid];
+      if (submap) {
+        for(const tid of Object.keys(submap)) {
+          d2[tid] = true;
+        };
+      }
+    };
+    deps = d2;
+  }
+
+  if (link_map[to.id]) {
+    if (link_map[to.id][from.id]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+export function snap_to(
+  t: Point,
+  node: GrabNode,
+  x_sorted_nodes: { t: number, node: GrabNode }[],
+  y_sorted_nodes: { t: number, node: GrabNode }[]
+) {
+  /**
+   * 昇順ソートされた点列 ps と座標 t が与えられているとき、座標 t にスナップするべき ps の要素 p を見つけたい。
+   * p が満たしているべき条件は、スナップの"猶予"をdとすると
+   * - t - d <= p
+   * - p <= t + d
+   */
+  const x = t.x + node.width / 2;
+  const y = t.y + node.height / 2;
+  const snap_width = 20;
+  const x0 = _.findIndex(x_sorted_nodes, n => x - snap_width <= n.t);
+  const x1 = _.findLastIndex(x_sorted_nodes, n => n.t <= x + snap_width);
+  const y0 = _.findIndex(y_sorted_nodes, n => y - snap_width <= n.t);
+  const y1 = _.findLastIndex(y_sorted_nodes, n => n.t <= y + snap_width);
+  const x_snapped = (x0 >= 0 && x1 >= 0 && x0 <= x1) ? x_sorted_nodes[Math.floor((x0 + x1 + 1) / 2)] : undefined;
+  const y_snapped = (y0 >= 0 && y1 >= 0 && y0 <= y1) ? y_sorted_nodes[Math.floor((y0 + y1 + 1) / 2)] : undefined;
+  const snap = {
+    x: x_snapped ? x_snapped.t : null,
+    y: y_snapped ? y_snapped.t : null,
+  };
+  // if (x_snapped || y_snapped) {
+  //   console.log(x_snapped, y_snapped, x, y, snap.x, snap.y, x0, x1, y0, y1);
+  // }
+  return snap;
+}
+
+  // // [Firebase I/O]
+  // private initiate() {
+  //   this.dag = D.new_dag()
+  //   this.nodes = this.dag.nodes;
+  //   this.link_map = this.dag.links;
+  //   const N = 30;
+  //   const R = N * 50 * 1.2 / 2 / Math.PI;
+  //   const L = 10;
+  //   _.range(0, N).forEach(i => {
+  //     const r = R;
+  //     const t = 2 * Math.PI / N * i;
+  //     this.add_new_node({
+  //       title: `#${i+1}`,
+  //       x: 10 + i % L * 80,
+  //       y: 10 + Math.floor(i / L) * 80,
+  //       // x: 400 + r * Math.cos(t),
+  //       // y: 400 + r * Math.sin(t),
+  //     });
+  //   });
+  //   _.range(0, N * 3).forEach(() => {
+  //     const i = Math.floor(Math.random() * this.nodes.length);
+  //     const j = Math.floor(Math.random() * this.nodes.length);
+  //     this.set_link(this.nodes[i], this.nodes[j]);
+  //   });
+  //   this.flush_graph()
+  // }

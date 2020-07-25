@@ -7,18 +7,17 @@ g.node(
       :width="node.width" :height="node.height"
       draggable
       @mousedown.stop="mouseDownBody($event)"
-      @mouseEnter.stop="mouseEnter($event)"
+      @mouseenter.stop="mouseEnter($event)"
       @mouseleave.stop="mouseLeave($event)"
-      @click="$emit('click', $event)"
     )
   text(transform="translate(4,20)") {{ node.title }}
 
   g.resizer(v-if="status.selected")
     rect.edge(v-for="rb in resizer_binds" :key="rb.resizeMode"
-      :class="rb.resizeMode" :x="rb.x" :y="rb.y"
+      :class="rb.class" :x="rb.x" :y="rb.y"
       :width="rb.width" :height="rb.height"
       fill="#111" stroke="none" draggable
-      @mousedown.stop="mouseDownResizer($event, rb.resizeMode)"
+      @mousedown.stop="mouseDownResizer($event, rb.resizeVertical, rb.resizeHorizontal)"
     )
   g.link_target(v-if="status.link_targeted")
     rect.link_target_rect(
@@ -57,14 +56,14 @@ export default defineComponent({
       resizer_binds: computed(() => {
         const node = prop.node;
         return [
-          { resizeMode: "n",  x: node.width/2 - edgeWidth, y: -edgeWidth },
-          { resizeMode: "nw", x: -edgeWidth,               y: -edgeWidth },
-          { resizeMode: "w",  x: -edgeWidth,               y: node.height/2 - edgeWidth },
-          { resizeMode: "sw", x: -edgeWidth,               y: node.height - edgeWidth },
-          { resizeMode: "s",  x: node.width/2 - edgeWidth, y: node.height - edgeWidth },
-          { resizeMode: "se", x: node.width   - edgeWidth, y: node.height - edgeWidth },
-          { resizeMode: "e",  x: node.width   - edgeWidth, y: node.height/2 - edgeWidth },
-          { resizeMode: "ne", x: node.width   - edgeWidth, y: -edgeWidth },
+          { class: "n",                         x: node.width/2 - edgeWidth, resizeVertical: "n", y:               - edgeWidth },
+          { class: "nw", resizeHorizontal: "w", x:              - edgeWidth, resizeVertical: "n", y:               - edgeWidth },
+          { class: "w",  resizeHorizontal: "w", x:              - edgeWidth,                      y: node.height/2 - edgeWidth },
+          { class: "sw", resizeHorizontal: "w", x:              - edgeWidth, resizeVertical: "s", y: node.height   - edgeWidth },
+          { class: "s",                         x: node.width/2 - edgeWidth, resizeVertical: "s", y: node.height   - edgeWidth },
+          { class: "se", resizeHorizontal: "e", x: node.width   - edgeWidth, resizeVertical: "s", y: node.height   - edgeWidth },
+          { class: "e",  resizeHorizontal: "e", x: node.width   - edgeWidth,                      y: node.height/2 - edgeWidth },
+          { class: "ne", resizeHorizontal: "e", x: node.width   - edgeWidth, resizeVertical: "n", y:               - edgeWidth },
         ].map(d => ({ ...d, width: 2 * edgeWidth, height: 2 * edgeWidth }))
       }),
 
@@ -102,9 +101,9 @@ export default defineComponent({
         context.emit("grabMouseDownBody", { event, node });
       },
 
-      mouseDownResizer(event: MouseEvent, resizeMode: D.ResizeMode) {
+      mouseDownResizer(event: MouseEvent, resizeVertical?: "n" | "s", resizeHorizontal?: "w" | "e") {
         const node = prop.node;
-        context.emit("grabMouseDownResizer", { event, node, resizeMode });
+        context.emit("grabMouseDownResizer", { event, node, resizeVertical, resizeHorizontal });
       },
 
       mouseEnter(event: MouseEvent) {

@@ -1,5 +1,5 @@
 import * as _ from "lodash";
-import firebase from "firebase";
+import firebase, { firestore } from "firebase";
 import * as uuid from "uuid";
 import * as U from "@/util";
 
@@ -163,3 +163,50 @@ export const useObjectLister = <ObjectType extends ObjectBase>(
   };
 };
 
+export const useObjectEditor = <ObjectType extends ObjectBase>(
+  context: SetupContext,
+  collectionPath: string,
+  option: {
+    saveFormatter?: (object: ObjectType) => any,
+    fetchFormatter?: (data: firestore.DocumentSnapshot) => ObjectType,
+  } = {}
+) => {
+  const editor: {
+    object: ObjectType | null;
+    working: "idling" | "fetching" | "saving";
+  } = reactive({
+    object: null,
+    working: "idling",
+  });
+
+  return {
+    editor,
+
+    async fetch_object(id: string) {
+      if (editor.working === "idling") {
+        try {
+          editor.working = "fetching";
+          const doc = await firestore().collection(collectionPath).doc(id).get();
+          return option.fetchFormatter ? option.fetchFormatter(doc) : doc.data();
+        } catch (e) {
+          editor.working = "idling";
+          throw e;
+        }
+      }
+      return null;
+    },
+
+    async save_object(merge = false) {
+      if (editor.object && editor.working === "idling") {
+        try {
+          editor.working = "saving";
+          const data = option.saveFormatter ? option.saveFormatter(editor.object) : editor.object;
+          return firestore().collection(collectionPath).doc(editor.object.id).set(data, { merge });
+        } catch (e) {
+          editor.working = "idling";
+          throw e;
+        }
+      }
+    }
+  };
+}

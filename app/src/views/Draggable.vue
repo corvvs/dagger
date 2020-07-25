@@ -3,13 +3,34 @@
   .mid_pane
     .svgs
       svg.svgmaster(
-        @mousemove.stop="d_mm"
-        @mouseup.stop="mup_field"
-        @mousedown.stop="mdown_field"
+        ref="svg"
+        @mousemove.stop="debouncedMouseMove"
+        @mouseup.stop="mouseUpField"
+        @mousedown.stop="mouseDownField"
       )
         g.field(
           :transform="field_transform"
         )
+          g.snap(v-if="selection_mode === 'move' && offset.snap")
+            g.horizontal
+              line(
+                v-if="typeof offset.snap.y === 'number'"
+                x1="-100000"
+                x2="100000"
+                :y1="offset.snap.y"
+                :y2="offset.snap.y"
+                stroke="#aaf"
+              )
+            g.vertical
+              line(
+                v-if="typeof offset.snap.x === 'number'"
+                :x1="offset.snap.x"
+                :x2="offset.snap.x"
+                y1="-100000"
+                y2="100000"
+                stroke="#aaf"
+              )
+
           g.anchors
             g.anchor_from(v-for="(anchor, id) in link_dictionary" :key="id")
               SvgArrow(v-bind="link_binds[id]")
@@ -18,11 +39,10 @@
             SvgGrabNode(v-for="node in nodes" :key="node.id"
               :node="node"
               :status="node_status_map[node.id]"
-              @grabMouseDownBody="mdown_node"
-              @grabMouseDownResizer="mdown_node_resizer"
-              @grabMouseEnter="menter_node"
-              @grabMouseLeave="mleave_node"
-              @click="receive_grab"
+              @grabMouseDownBody="mouseDownNode"
+              @grabMouseDownResizer="mouseDownResizer"
+              @grabMouseEnter="mouseEnterNode"
+              @grabMouseLeave="mouseLeaveNode"
             )
             g.linker(v-if="selection_mode === 'link' && selected_node && anchored_point")
                 SvgArrow(
@@ -30,7 +50,7 @@
                 )
 
 
-      .node-panel(v-if="selected_node" :style="{ left: `${selected_node.x - 5 + field_offset.x}px`, top: `${selected_node.y - 40 + field_offset.y}px` }")
+      .node-panel(v-if="selected_node" :style="{ left: `${selected_node.x - 5 + offset.field.x}px`, top: `${selected_node.y - 40 + offset.field.y}px` }")
         v-btn(small icon
           @click="start_linking(selected_node)"
           :color="selection_mode === 'link' ? 'info' : 'grey'"
@@ -87,7 +107,7 @@
         .value {{ selected_node_id || "(none)" }}
       .line
         .name Resize Mode
-        .value {{ resizing_mode || "(none)" }}
+        .value ({{ resizing_mode_vertical }}, {{ resizing_mode_horizontal }})
       .line
         .name Dragging Node
         .value {{ dragging_node_id || "(none)" }}
@@ -96,13 +116,16 @@
         .value {{ over_node ? over_node.id : "(none)" }}
       .line
         .name Field Offset
-        .value {{ field_offset || "(none)" }}
+        .value {{ offset.field || "(none)" }}
       .line
         .name Cursor Offset
-        .value {{ cursor_offset || "(none)" }}
+        .value {{ offset.cursor || "(none)" }}
       .line
         .name Inner Offset
-        .value {{ inner_offset || "(none)" }}
+        .value {{ offset.inner || "(none)" }}
+      .line
+        .name Snap To
+        .value {{ offset.snap || "(none)" }}
 </template>
 
 <script lang="ts">
@@ -151,6 +174,11 @@ export default class Draggable extends Vue {
   @Watch("dag_id")
   async fetch() {
     console.log(this.auth_state.user);
+    this.dag = null;
+    this.nodes = [];
+    this.link_map = {};
+    this.link_dictionary = {};
+    this.flush_graph()
     if (this.auth_state.user && this.dag_id) {
       const dag = await D.get_dag(this.auth_state.user, this.dag_id);
       if (dag) {
@@ -162,18 +190,13 @@ export default class Draggable extends Vue {
       this.link_map = this.dag!.links;
       this.link_dictionary = {};
       _(this.link_map).values().flatMap(submap => _.values(submap)).value().forEach(link => {
-        this.$set(this.link_dictionary, link.id, link);
-      })
-      this.flush_node_status_map()
-      this.update_all_links()
-      return;
+        Vue.set(this.link_dictionary, link.id, link);
+      });
+      if (!dag) {
+        this.add_new_node();
+      }
+      this.flush_graph();
     }
-    this.dag = null;
-    this.nodes = [];
-    this.link_map = {};
-    this.link_dictionary = {};
-    this.flush_node_status_map()
-    this.update_all_links()
   }
 
   mounted() {
@@ -181,8 +204,6 @@ export default class Draggable extends Vue {
   }
 
 
-
-  indicator_message = "";
 
   nodes: D.GrabNode[] = [];
   get node_map() {
@@ -210,63 +231,30 @@ export default class Draggable extends Vue {
       source_sink: this.selected_node_id ? null : is_source ? "source" : is_sink ? "sink" : null,
     };
   }
-  flush_node_status_map() {
+  flush_graph() {
     this.node_status_map = {};
     this.nodes.forEach(node => this.set_node_status(node));
+    _.each(this.link_map, (submap, fid) => {
+      _.each(submap, (link, tid)  => {
+        this.link_binds[link.id] = this.link_bind(link);
+      });
+    });
   }
   set_node_status(node: D.GrabNode) {
-    this.$set(this.node_status_map, node.id, this.node_status(node))
+    Vue.set(this.node_status_map, node.id, this.node_status(node))
   }
 
   add_new_node(arg: any = {}) {
     const n = this.nodes.length;
     this.nodes.push(makeGrabNode(arg));
-    this.flush_node_status_map()
+    this.flush_graph()
   }
 
   /**
    * *node* から/へ到達可能なnodeの辞書を返す
    */
   reachable_nodes(dir: "from" | "to", origin_node: D.GrabNode) {
-    const reachable_node: { [key: string]: number } = {};
-    const neighboring_node: { [key: string]: D.GrabNode } = {};
-    const neighboring_link: { [key: string]: D.GrabLink } = {};
-    const connected_link: { [key: string]: D.GrabLink } = {};
-    let deps: { [key: string]: D.GrabNode } = { [origin_node.id]: origin_node };
-    const link_map = dir === "from" ? this.link_map : this.reverse_link_map;
-    let distance = 0;
-    while (Object.keys(deps).length > 0) {
-      distance += 1;
-      const d2: { [key: string]: D.GrabNode } = {};
-      for (const fid of Object.keys(deps)) {
-        // console.log(dir, fid, !!d2[fid])
-        if (d2[fid]) { continue; }
-        const submap = link_map[fid];
-        if (submap) {
-          for (const tid of Object.keys(submap)) {
-            const link = submap[tid];
-            const link_id = link.id;
-            if (distance === 1) {
-              neighboring_link[link_id] = link;
-              neighboring_node[tid] = this.node_map[tid];
-            }
-            connected_link[link_id] = link;
-            if (reachable_node[tid]) { continue }
-            d2[tid] = this.node_map[tid];
-          };
-        }
-      };
-      deps = d2;
-      _.each(deps, (node, id) => reachable_node[id] = distance);
-      // console.log(dir, Object.keys(deps));
-    }
-    // console.log(neighboring_link, connected_link)
-    return {
-      reachable_node,
-      neighboring_node,
-      neighboring_link,
-      connected_link,
-    };
+    return D.survey_reachablility(origin_node, this.node_map, dir === "from" ? this.link_map : this.reverse_link_map);
   }
 
   get reachable_map() {
@@ -274,11 +262,29 @@ export default class Draggable extends Vue {
     const from = this.reachable_nodes("from", this.selected_node)
     const to = this.reachable_nodes("to", this.selected_node)
     return {
+      /**
+       * selected_node から到達可能なノード
+       */
       from_selected: from.reachable_node,
+      /**
+       * selected_node から出ているリンク
+       */
       from_neighboring_link: from.neighboring_link,
+      /**
+       * selected_node から到達可能なリンク
+       */
       from_connected_link: from.connected_link,
+      /**
+       * selected_node に到達可能なノード
+       */
       to_selected: to.reachable_node,
+      /**
+       * selected_node に入っているリンク
+       */
       to_neighboring_link: to.neighboring_link,
+      /**
+       * selected_node に到達可能なリンク
+       */
       to_connected_link: to.connected_link,
     }
   }
@@ -289,72 +295,6 @@ export default class Draggable extends Vue {
     if (this.reachable_map.to_selected[to.id]) { return false; }
     if (this.reachable_map.from_selected[to.id] <= 1) { return false; }
     return true;
-  }
-
-  linkable(from: D.GrabNode, to: D.GrabNode) {
-    if (from.id === to.id) { return false; }
-    // **現在のグラフはDAGであると仮定する**
-
-    // from -> to の辺があるとNG
-    // (経路はあってもよい)
-    if (this.link_map[from.id]) {
-      if (this.link_map[from.id][to.id]) {
-        return false;
-      }
-    }
-    // to -> from の経路があるとNG
-    // (もちろん辺もNG)
-    const visited: { [key: string]: boolean } = {};
-    let deps: { [key: string]: D.GrabNode } = { [to.id]: from };
-    while (Object.keys(deps).length > 0) {
-      const d2: { [key: string]: D.GrabNode } = {};
-      for (const fid of Object.keys(deps)) {
-        if (fid === from.id) { return false; }
-        if (visited[fid]) { continue; }
-        visited[fid] = true;
-        const submap = this.link_map[fid];
-        if (submap) {
-          for(const tid of Object.keys(submap)) {
-            d2[tid] = this.node_map[tid];
-          };
-        }
-      };
-      deps = d2;
-    }
-
-    if (this.link_map[to.id]) {
-      if (this.link_map[to.id][from.id]) {
-        return false;
-      }
-    }
-    return true;
-  }
-
-  // [Firebase I/O]
-  private initiate() {
-    this.dag = D.new_dag()
-    this.nodes = this.dag.nodes;
-    this.link_map = this.dag.links;
-    const N = 30;
-    const R = N * 50 * 1.2 / 2 / Math.PI;
-    const L = 10;
-    _.range(0, N).forEach(i => {
-      const r = R;
-      const t = 2 * Math.PI / N * i;
-      this.add_new_node({
-        title: `#${i+1}`,
-        x: 10 + i % L * 80,
-        y: 10 + Math.floor(i / L) * 80,
-        // x: 400 + r * Math.cos(t),
-        // y: 400 + r * Math.sin(t),
-      });
-    });
-    _.range(0, N * 3).forEach(() => {
-      const i = Math.floor(Math.random() * this.nodes.length);
-      const j = Math.floor(Math.random() * this.nodes.length);
-      this.set_link(this.nodes[i], this.nodes[j]);
-    });
-    this.flush_node_status_map()
   }
 
   get dag_savable() { return !!this.dag && !!this.auth_state.user; }
@@ -394,7 +334,7 @@ export default class Draggable extends Vue {
       class: _.compact([
         this.selection_mode,
         this.resizing_mode,
-        this.mdowning_field ? "dragging-field" : "",
+        this.mouseDowningField ? "dragging-field" : "",
       ]),
     };
     return r;
@@ -410,24 +350,6 @@ export default class Draggable extends Vue {
     const node_to = this.node_map[anchor.to_id];
     if (!node_from || !node_to) { return {} }
 
-    // facing edge
-    const c1 = {
-      x: node_from.x + node_from.width / 2,
-      y: node_from.y + node_from.height / 2,
-    };
-
-    const c2 = {
-      x: node_to.x + node_to.width / 2,
-      y: node_to.y + node_to.height / 2,
-    };
-
-    const r = Math.pow(c2.x - c1.x, 2) + Math.pow(c2.y - c1.y, 2);
-    if (!r) { return {} }
-    const cp1 = D.collision_point({ from: c2, to: c1 }, node_from);
-    const cp2 = D.collision_point({ from: c1, to: c2 }, node_to);
-    if (!cp1 || !cp2) { return {} }
-    const rp = Math.pow(cp2.x - cp1.x, 2) + Math.pow(cp2.y - cp1.y, 2);
-    if (!rp) { return {} }
     const neighboring = !!(this.reachable_map && (this.reachable_map.from_neighboring_link[anchor.id] || this.reachable_map.to_neighboring_link[anchor.id]));
     const connected = !!(this.reachable_map && (this.reachable_map.from_connected_link[anchor.id] || this.reachable_map.to_connected_link[anchor.id]));
     // console.log(anchor.id, neighboring, connected)
@@ -437,16 +359,15 @@ export default class Draggable extends Vue {
     } : {
       stroke: "#666",
     };
+
     return {
       status: {
         name: anchor.id,
-        x1: cp1.x,
-        y1: cp1.y,
-        x2: cp2.x,
-        y2: cp2.y,
         arrowheadPosition: 0.8,
         ...stroke_attr,
-      }
+      },
+      from: node_from,
+      to: node_to,
     };
   }
 
@@ -454,14 +375,11 @@ export default class Draggable extends Vue {
   get selected_node() { return this.node_map[this.selected_node_id] }
   @Watch("selected_node_id")
   changed_selected_node_id() {
-    this.flush_node_status_map()
-    this.update_all_links()
+    this.flush_graph()
     if (this.selected_node_id) {
       const nodes = this.nodes.filter(n => n.id !== this.selected_node_id)
       this.x_sorted_nodes = _.sortBy(nodes.map(n => ({ t: n.x + n.width / 2, node: n })), n => n.t);
       this.y_sorted_nodes = _.sortBy(nodes.map(n => ({ t: n.y + n.height / 2, node: n })), n => n.t);
-      console.log(this.x_sorted_nodes.map(n => n.node.title))
-      console.log(this.y_sorted_nodes.map(n => n.node.title))
     }
   }
   
@@ -473,80 +391,66 @@ export default class Draggable extends Vue {
    * ノードのドラッグ時にスナップするかどうか
    */
   snap_on = false
-  snap_to(tx: number, ty: number, node: D.GrabNode) { 
-    /**
-     * 昇順ソートされた点列 ps と座標 t が与えられているとき、座標 t にスナップするべき ps の要素 p を見つけたい。
-     * p が満たしているべき条件は、スナップの"猶予"をdとすると
-     * - t - d <= p
-     * - p <= t + d
-     */
-    const x = tx + node.width / 2;
-    const y = ty + node.height / 2;
-    const snap_width = 20;
-    const x0 = _.findIndex(this.x_sorted_nodes, n => x - snap_width <= n.t);
-    const x1 = _.findLastIndex(this.x_sorted_nodes, n => n.t <= x + snap_width);
-    const y0 = _.findIndex(this.y_sorted_nodes, n => y - snap_width <= n.t);
-    const y1 = _.findLastIndex(this.y_sorted_nodes, n => n.t <= y + snap_width);
-    const x_snapped = (x0 >= 0 && x1 >= 0 && x0 <= x1) ? this.x_sorted_nodes[Math.floor((x0 + x1 + 1) / 2)] : null;
-    const y_snapped = (y0 >= 0 && y1 >= 0 && y0 <= y1) ? this.y_sorted_nodes[Math.floor((y0 + y1 + 1) / 2)] : null;
-    const snap = {
-      x: x_snapped ? x_snapped.t - node.width / 2 : tx,
-      y: y_snapped ? y_snapped.t - node.height / 2 : ty,
-    };
-    // if (x_snapped || y_snapped) {
-    //   console.log(x_snapped, y_snapped, x, y, snap.x, snap.y, x0, x1, y0, y1);
-    // }
-    return snap;
-  }
 
   selection_mode: D.SelectionMode | null = null
   @Watch("selection_mode")
   changed_selection_mode() {
-    this.flush_node_status_map()
-    this.update_all_links()
+    this.flush_graph()
   }
 
-  resizing_mode: D.ResizeMode | null = null
-  over_node: D.GrabNode | null = null
-  /**
-   * マウスカーソルの現在位置
-   */
-  cursor_offset: { x: number, y: number } | null = null;
-  @Watch("cursor_offset")
-  changed_cursor_offset() {
-    if (this.cursor_offset) {
-      this.indicator_message = JSON.stringify(this.cursor_offset);
-    }
+  resizing_mode_vertical: "n" | "s" | null = null
+  resizing_mode_horizontal: "w" | "e" | null = null
+  get resizing_mode() {
+    return (this.resizing_mode_vertical || "") + (this.resizing_mode_horizontal || "")
   }
-  /**
-   * ノードの内部座標系におけるオフセット値
-   * = ノードの原点から見たオフセット位置の座標
-   * リサイズ・移動に使う
-   */
-  inner_offset: { x: number, y: number } | null = null;
-  /**
-   * フィールドのオフセット値
-   * = SVG座標系の原点から見た「現在のビューポートの原点に対応する位置」の座標
-   */
-  field_offset: { x: number, y: number } = { x: 0, y: 0 };
+  over_node: D.GrabNode | null = null
+  offset: {
+    /**
+     * マウスカーソルの現在位置
+     */
+    cursor: D.Point | null;
+    /**
+     * ノードの内部座標系におけるオフセット値
+     * = ノードの原点から見たオフセット位置の座標
+     * リサイズ・移動に使う
+     */
+    inner: D.Point | null;
+    /**
+     * フィールドのオフセット値
+     * = SVG座標系の原点から見た「現在のビューポートの原点に対応する位置」の座標
+     */
+    field: D.Point;
+
+    snap: { x: number | null, y: number | null } | null;
+  } = {
+    cursor: null,
+    inner: null,
+    field: { x: 0, y: 0 },
+    snap: null,
+  };
   /**
    * フィールドのズームレベル
    */
   field_zoom_level = 0;
   get field_transform() {
     const scale = Math.pow(2, this.field_zoom_level);
-    return `translate(${this.field_offset.x},${this.field_offset.y}) scale(${scale}, ${scale})`;
+    return `translate(${this.offset.field.x},${this.offset.field.y}) scale(${scale}, ${scale})`;
   }
   get anchored_point() {
+    const svg: any = this.$refs.svg;
+    const rect = svg.getBoundingClientRect();
     if (this.selection_mode === "link") {
-      if (this.selected_node && this.over_node && this.linkable(this.selected_node, this.over_node)) {
+      if (this.selected_node && this.over_node && D.linkable(this.selected_node, this.over_node, this.link_map)) {
         return {
           x: this.over_node.x + this.over_node.width/2,
           y: this.over_node.y + this.over_node.height/2,
         };
       }
     }
-    return this.cursor_offset ? { x: this.cursor_offset.x - this.field_offset.x, y: this.cursor_offset.y - this.field_offset.y } : null;
+    return this.offset.cursor ? {
+      x: this.offset.cursor.x - this.offset.field.x - rect.x,
+      y: this.offset.cursor.y - this.offset.field.y - rect.y,
+    } : null;
   }
 
   /**
@@ -554,11 +458,11 @@ export default class Draggable extends Vue {
    */
   mm(event: MouseEvent) {
     if (!this.selection_mode) {
-      if (this.mdowning_field && this.cursor_offset) {
+      if (this.mouseDowningField && this.offset.cursor) {
         // フィールド
-        this.field_offset.x += event.clientX - this.cursor_offset.x;
-        this.field_offset.y += event.clientY - this.cursor_offset.y;
-        this.cursor_offset = { x: event.clientX, y: event.clientY }
+        this.offset.field.x += event.clientX - this.offset.cursor.x;
+        this.offset.field.y += event.clientY - this.offset.cursor.y;
+        this.offset.cursor = { x: event.clientX, y: event.clientY }
       }
       return
     }
@@ -566,18 +470,23 @@ export default class Draggable extends Vue {
     switch (this.selection_mode) {
       case "move": {
         const node = this.node_map[this.dragging_node_id];
-        if (!node || !this.inner_offset) { return }
-        const lx = x - this.inner_offset.x;
-        const ly = y - this.inner_offset.y;
+        if (!node || !this.offset.inner) { break }
+        const lx = x - this.offset.inner.x;
+        const ly = y - this.offset.inner.y;
         if (this.snap_on) {
-          const snap = this.snap_to(
-            lx,
-            ly,
-            node
-          );  
-          node.x = snap.x;
-          node.y = snap.y; 
+          const snap = D.snap_to({
+              x: lx,
+              y: ly,
+            },
+            node,
+            this.x_sorted_nodes,
+            this.y_sorted_nodes
+          );
+          this.offset.snap = snap;
+          node.x = _.isFinite(snap.x) ? snap.x! - node.width / 2 : lx;
+          node.y = _.isFinite(snap.y) ? snap.y! - node.height / 2 : ly;
         } else {
+          this.offset.snap = null;
           node.x = lx;
           node.y = ly; 
         }
@@ -587,130 +496,115 @@ export default class Draggable extends Vue {
       }
       case "resize": {
         const node = this.node_map[this.dragging_node_id];
-        if (!node) { return }
-        if (this.cursor_offset) {
-          const mx = x - this.cursor_offset.x;
-          const my = y - this.cursor_offset.y;
-          const ax = node.x + mx;
-          const ay = node.y + my;
-          this.indicator_message = JSON.stringify({ ...this.cursor_offset, mx, my, ax, ay });
-          let touched_x = false;
-          if (this.resizing_mode === "w" || this.resizing_mode === "nw" || this.resizing_mode === "sw") {
-            const new_west_x = node.x + mx;
-            const new_width = node.width - mx;
-            if (nodeMinimum.width <= new_width) {
-              node.x = new_west_x;
-              node.width = new_width;
-              touched_x = true;
+        if (!node || !this.offset.cursor) { break; }
+        let touched_x = false;
+        let touched_y = false
+        if (this.resizing_mode_horizontal) {
+          const mx = x - this.offset.cursor.x;
+          const new_width = node.width + (this.resizing_mode_horizontal === "w" ? -mx : +mx);
+          if (nodeMinimum.width <= new_width) {
+            if (this.resizing_mode_horizontal === "w") {
+              node.x += mx;
             }
-          } else if (this.resizing_mode === "e" || this.resizing_mode === "ne" || this.resizing_mode === "se") {
-            const new_width = node.width + mx;
-            if (nodeMinimum.width <= new_width) {
-              node.width = new_width;
-              touched_x = true;
+            node.width = new_width;
+            touched_x = true;
+            this.offset.cursor.x = x;
+          }
+        }
+        if (this.resizing_mode_vertical) {
+          const my = y - this.offset.cursor.y;
+          const new_height = node.height + (this.resizing_mode_vertical === "n" ? -my : +my);
+          if (nodeMinimum.height <= new_height) {
+            if (this.resizing_mode_vertical === "n") {
+              node.y += my;
             }
+            node.height = new_height;
+            touched_y = true;
+            this.offset.cursor.y = y;
           }
-          let touched_y = false
-          if (this.resizing_mode === "n" || this.resizing_mode === "nw" || this.resizing_mode === "ne") {
-            const new_north_y = node.y + my;
-            const new_height = node.height - my;
-            if (nodeMinimum.height <= new_height) {
-              node.y = new_north_y;
-              node.height = new_height;
-              touched_y = true;
-            }
-          } else if (this.resizing_mode === "s" || this.resizing_mode === "sw" || this.resizing_mode === "se") {
-            const new_height = node.height + my;
-            if (nodeMinimum.height <= new_height) {
-              node.height = new_height;
-              touched_y = true;
-            }
-          }
-          if (touched_x) {
-            this.cursor_offset.x = x;
-          }
-          if (touched_y) {
-            this.cursor_offset.y = y;
-          }
-          if (touched_x || touched_y) {
-            this.update_links(node);
-          }
+        }
+        if (touched_x || touched_y) {
+          this.update_links(node);
         }
         break;
       }
       case "link": {
-        this.cursor_offset = { x, y };
+        this.offset.cursor = { x, y };
         break;
       }
     }
   }
-  d_mm = _.throttle(this.mm, 33);
+  debouncedMouseMove = _.throttle(this.mm, 33);
   // d_mm = _.throttle(_.debounce(this.mm, 34), 34);
 
 
-  mdowning_field = false
+  mouseDowningField = false
 
   /**
    * フィールド上 mousedown
    */
-  mdown_field(event: MouseEvent) {
+  mouseDownField(event: MouseEvent) {
     if (this.selected_node_id) {
       this.selected_node_id = ""
       this.selection_mode = null
-      this.resizing_mode = null
+      this.resizing_mode_horizontal = null
+      this.resizing_mode_vertical = null
     }
-    this.mdowning_field = true
-    this.cursor_offset = { x: event.clientX, y: event.clientY };
+    this.mouseDowningField = true
+    this.offset.cursor = { x: event.clientX, y: event.clientY };
   }
 
-  mdown_node(arg: { event: MouseEvent, node: D.GrabNode }) {
+  mouseDownNode(arg: { event: MouseEvent, node: D.GrabNode }) {
     // console.log(arg.event.type, this.selection_mode)
     const { event, node } = arg;
     if (this.selection_mode === "link") {
-      if (this.selected_node && this.linkable(this.selected_node, node)) {
+      if (this.selected_node && D.linkable(this.selected_node, node, this.link_map)) {
         this.set_link(this.selected_node, node)
       }
     } else {
       this.dragging_node_id = node.id
-      this.inner_offset = { x: Math.floor(event.clientX - node.x), y: Math.floor(event.clientY - node.y) }; 
+      this.offset.inner = { x: Math.floor(event.clientX - node.x), y: Math.floor(event.clientY - node.y) }; 
       this.selection_mode = "move"
       this.selected_node_id = node.id
-      this.resizing_mode = null
+      this.resizing_mode_horizontal = null
+      this.resizing_mode_vertical = null
     }
-    this.cursor_offset = { x: event.clientX, y: event.clientY };
+    this.offset.cursor = { x: event.clientX, y: event.clientY };
   }
 
-  mdown_node_resizer(arg: { event: MouseEvent, node: D.GrabNode, resizeMode: D.ResizeMode }) {
+  mouseDownResizer(arg: { event: MouseEvent, node: D.GrabNode, resizeVertical?: "n" | "s", resizeHorizontal?: "w" | "e" }) {
     // console.log(arg.event.type, this.selection_mode)
-    const { event, node, resizeMode } = arg;
+    const { event, node, resizeVertical, resizeHorizontal } = arg;
     this.dragging_node_id = node.id
-    this.inner_offset = { x: Math.floor(event.clientX - node.x), y: Math.floor(event.clientY - node.y) }; 
+    this.offset.inner = { x: Math.floor(event.clientX - node.x), y: Math.floor(event.clientY - node.y) }; 
     this.selection_mode = "resize"
     this.selected_node_id = node.id
-    this.resizing_mode = resizeMode
+    this.resizing_mode_vertical = resizeVertical || null
+    this.resizing_mode_horizontal = resizeHorizontal || null
     this.set_node_status(node)
-    this.cursor_offset = { x: event.clientX, y: event.clientY };
+    this.offset.cursor = { x: event.clientX, y: event.clientY };
   }
 
-  mup_field(event: MouseEvent) {
+  mouseUpField(event: MouseEvent) {
     this.dragging_node_id = ""
-    this.resizing_mode = null
-    this.inner_offset = null;
-    this.mdowning_field = false
+    this.resizing_mode_horizontal = null
+    this.resizing_mode_vertical = null
+    this.offset.inner = null;
+    this.mouseDowningField = false
   }
 
-  menter_node(arg: { event: MouseEvent, node: D.GrabNode }) {
+  mouseEnterNode(arg: { event: MouseEvent, node: D.GrabNode }) {
     // console.log(arg.event.type, this.selection_mode)
     const node = arg.node;
-    if (this.selection_mode === "link") {
+    // if (this.selection_mode === "link") {
       if (!this.over_node || this.over_node.id !== node.id) {
         this.over_node = node
         this.set_node_status(node)
       }
-    }
+    // }
   }
 
-  mleave_node(arg: { event: MouseEvent, node: D.GrabNode }) {
+  mouseLeaveNode(arg: { event: MouseEvent, node: D.GrabNode }) {
     // console.log(arg.event.type, this.selection_mode)
     const node = arg.node;
     if (this.over_node && this.over_node.id === node.id) {
@@ -730,7 +624,7 @@ export default class Draggable extends Vue {
     } else {
       this.selected_node_id = node.id;
       this.selection_mode = "link";
-      this.cursor_offset = null;
+      this.offset.cursor = null;
     }
   }
 
@@ -752,11 +646,11 @@ export default class Draggable extends Vue {
   }
 
   set_link(from: D.GrabNode, to: D.GrabNode) {
-    if (this.linkable(from, to)) {
+    if (D.linkable(from, to, this.link_map)) {
       const submap = this.link_map[from.id]
       if (!submap || !submap[to.id]) {
         if (!submap) {
-          this.$set(this.link_map, from.id , { });
+          Vue.set(this.link_map, from.id , { });
         }
         const id = `${from.id}_${to.id}`;
         const link = {
@@ -764,27 +658,17 @@ export default class Draggable extends Vue {
           from_id: from.id,
           to_id: to.id,
         };
-        this.$set(this.link_map[from.id], to.id, link);
-        this.$set(this.link_dictionary, id, link);
-      this.$set(this.link_binds, id, this.link_bind(link));
+        Vue.set(this.link_map[from.id], to.id, link);
+        Vue.set(this.link_dictionary, id, link);
+        Vue.set(this.link_binds, id, this.link_bind(link));
       }
-    } else {
-      this.indicator_message = "duplicated link";
     }
-    this.flush_node_status_map()
+    this.flush_graph()
   }
 
   link_dictionary: { [key: string]: D.GrabLink } = {}
 
   link_map: D.LinkMap = {};
-
-  update_all_links() {
-    _.each(this.link_map, (submap, fid) => {
-      _.each(submap, (link, tid)  => {
-        this.link_binds[link.id] = this.link_bind(link);
-      });
-    });
-  }
 
   /**
    * ノード　origin に出入りするリンクを更新する
@@ -792,11 +676,9 @@ export default class Draggable extends Vue {
   update_links(origin: D.GrabNode) {
     if (this.link_map[origin.id]) {
       _.each(this.link_map[origin.id], link => this.link_binds[link.id] = this.link_bind(link))
-      // _.each(this.link_map[origin.id], link => this.$set(this.link_binds, link.id, this.link_bind(link)));
     }
     if (this.reverse_link_map[origin.id]) {
       _.each(this.reverse_link_map[origin.id], link => this.link_binds[link.id] = this.link_bind(link));
-      // _.each(this.reverse_link_map[origin.id], link => this.$set(this.link_binds, link.id, this.link_bind(link)));
     }
   }
 
@@ -821,9 +703,9 @@ export default class Draggable extends Vue {
   }
 
   delete_link(link: D.GrabLink) {
-    this.$delete(this.link_dictionary, link.id);
-    this.$delete(this.link_binds, link.id);
-    this.$delete(this.link_map[link.from_id], link.to_id);
+    Vue.delete(this.link_dictionary, link.id);
+    Vue.delete(this.link_binds, link.id);
+    Vue.delete(this.link_map[link.from_id], link.to_id);
   }
 
   delete_node(node: D.GrabNode) {
@@ -836,7 +718,7 @@ export default class Draggable extends Vue {
     if (this.reverse_link_map[node.id]) {
       _.each(this.reverse_link_map[node.id], (link) => this.delete_link(link));
     }
-    this.$delete(this.node_status_map, node.id);
+    Vue.delete(this.node_status_map, node.id);
     this.nodes.splice(i, 1);
   }
 
@@ -881,8 +763,7 @@ export default class Draggable extends Vue {
             node.x = p0[node.id]!.x + displacement[node.id]!.dx * t / 100;
             node.y = p0[node.id]!.y + displacement[node.id]!.dy * t / 100;
           });
-          this.flush_node_status_map()
-          this.update_all_links()
+          this.flush_graph()
         }
       }).finished;
       console.log(`[anime] fin.`);
