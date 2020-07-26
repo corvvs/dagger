@@ -50,6 +50,8 @@ export type GrabLink = {
   id: string;
   from_id: string;
   to_id: string;
+
+  title: string,
 };
 
 export type GrabArrow = {
@@ -90,7 +92,7 @@ export function spawn_lister(user: Auth.User) {
 export type ResizeMode = "n" | "w" | "s" | "e"
   | "nw" | "sw" | "se" | "ne";
 
-export type SelectionMode = "move" | "resize" | "link";
+export type ActionMode = "neutral" | "move" | "resize" | "link";
 
 /**
  * 点(px, py) を通り、その点から (vx, vy) の方位に延びる直線(向きあり)

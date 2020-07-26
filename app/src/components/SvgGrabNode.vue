@@ -20,12 +20,12 @@ g.node(
       fill="#111" stroke="none" draggable
       @mousedown.stop="mouseDownResizer($event, rb.resizeVertical, rb.resizeHorizontal)"
     )
-  g.link_target(v-if="status.link_targeted")
-    rect.link_target_rect(
+  g.outer_edge(v-if="status.overred || status.link_targeted")
+    rect.outer_edge_rect(
+      :class=""
       :x="-5" :y="-5"
       :width="node.width+10" :height="node.height+10"
       fill="none"
-      stroke="#f88"
     )
 </template>
 
@@ -84,11 +84,14 @@ export default defineComponent({
         } else if (prop.status.reachable_to_selected) {
           r.class.push("reachable-to-selected")
         }
+        if (prop.status.link_targeted) {
+          r.class.push("link_targeted")
+        }
         if (!prop.status.selected && prop.status.not_linkable_from_selected) {
           r.class.push("not_linkable_from_selected")
         }
         if (prop.status.overred) {
-          r.class.push("over");
+          r.class.push("overred");
           if (prop.status.selected && !prop.status.linkable_from_selected) {
             r.class.push("nonlinkable")
           }
@@ -174,4 +177,9 @@ export default defineComponent({
       cursor se-resize
     &.sw
       cursor sw-resize
+
+  .outer_edge_rect
+      stroke #888
+    &.link_targeted
+      stroke #f88
 </style>
