@@ -81,10 +81,10 @@
     h5 {{ dag.id }}
     .panel
       .subpanel
-        v-btn(x-small :disabled="!dag_savable" :loading="dag_saving" @click="dag_save()")
+        v-btn(x-small :disabled="!dag_savable" :loading="dag_working === 'saving'" @click="dag_save()")
           v-icon(small) cloud_upload
           | Save
-        v-btn(x-small :disabled="!dag_savable" :loading="dag_saving" @click="dag_load()")
+        v-btn(x-small :disabled="!dag_savable" :loading="dag_working === 'loading'" @click="dag_load()")
           v-icon(small) cloud_download
           | Load
     h4 Edit
@@ -98,13 +98,18 @@
         v-btn(x-small @click="snap_on = !snap_on" :color="snap_on ? 'blue info' : ''")
           | Snap
       v-slider(v-model="field_zoom_level" label="Field Zoom" :min="-4" :max="4" step="0" :messages="`${field_zoom_level}`")
+      .subpanel
+        v-text-field(v-model="title" label="Graph Title")
+      .subpanel
+        .line
+          .name Selected Node
+          .value {{ selected_node_id || "(none)" }}
+        v-textarea(v-if="selected_node" v-model="selected_node.title" label="Node Title")
+        
     .panel.status
       .line
         .name Selection Mode
         .value {{ selection_mode || "(nonse)" }}
-      .line
-        .name Selected Node
-        .value {{ selected_node_id || "(none)" }}
       .line
         .name Resize Mode
         .value ({{ resizing_mode_vertical }}, {{ resizing_mode_horizontal }})
@@ -144,9 +149,9 @@ import * as Auth from "@/models/auth";
 function makeGrabNode(overwrite: Partial<D.GrabNode> = {}) {
   return {
     id: `nd_${U.u_shorten_uuid(uuid.v4()).substring(0, 8)}`,
-    title: "無題",
-    width: 40,
-    height: 30,
+    title: "new node",
+    width: 80,
+    height: 40,
     x: 100,
     y: 100,
     z: 1,
@@ -168,7 +173,6 @@ export default class Draggable extends Vue {
 
   @Prop() auth_state!: Auth.AuthState
   @Prop() dag_id!: string;
-  dag: D.GrabDAG | null = null
 
   @Watch("auth_state.user")
   @Watch("dag_id")
@@ -176,6 +180,7 @@ export default class Draggable extends Vue {
     console.log(this.auth_state.user);
     this.dag = null;
     this.nodes = [];
+    this.title = "";
     this.link_map = {};
     this.link_dictionary = {};
     this.flush_graph()
@@ -186,6 +191,7 @@ export default class Draggable extends Vue {
       } else {
         this.dag = D.new_dag(this.dag_id);
       }
+      this.title = this.dag!.title;
       this.nodes = this.dag!.nodes;
       this.link_map = this.dag!.links;
       this.link_dictionary = {};
@@ -205,7 +211,12 @@ export default class Draggable extends Vue {
 
 
 
+  dag: D.GrabDAG | null = null
+  title: string = "";
   nodes: D.GrabNode[] = [];
+  link_map: D.LinkMap = {};
+  link_dictionary: { [key: string]: D.GrabLink } = {}
+
   get node_map() {
     return _.keyBy(this.nodes, node => node.id)
   }
@@ -246,7 +257,11 @@ export default class Draggable extends Vue {
 
   add_new_node(arg: any = {}) {
     const n = this.nodes.length;
-    this.nodes.push(makeGrabNode(arg));
+    this.nodes.push(makeGrabNode({
+      ...arg,
+      x: (n > 0 ? this.nodes[n-1].x : 0) + 10,
+      y: (n > 0 ? this.nodes[n-1].y : 0) + 10,
+    }));
     this.flush_graph()
   }
 
@@ -297,36 +312,37 @@ export default class Draggable extends Vue {
     return true;
   }
 
-  get dag_savable() { return !!this.dag && !!this.auth_state.user; }
-  dag_saving = false;
+  get dag_savable() { return !!this.dag && !!this.auth_state.user && this.dag_working === "idling"; }
+  dag_working: "saving" | "loading" | "idling" = "idling";
 
   async dag_save() {
     if (!this.auth_state.user) { return }
     if (!this.dag) { return }
-    if (this.dag_saving) { return }
+    if (this.dag_working !== "idling") { return }
     try {
-      this.dag_saving = true;
+      this.dag_working = "saving";
       this.dag.nodes = this.nodes;
       this.dag.links = this.link_map;
+      this.dag.title = this.title;
       await D.post_dag(this.auth_state.user, this.dag);
     } catch (e) {
       console.error(e);
     }
-    this.dag_saving = false;
+    this.dag_working = "idling";
   }
 
   async dag_load() {
     if (!this.auth_state.user) { return }
     if (!confirm("前回の保存より後の編集結果を取り消し、サーバに保存されている状態に戻します")) { return }
     if (!this.dag) { return }
-    if (this.dag_saving) { return }
+    if (this.dag_working !== "idling") { return }
     try {
-      this.dag_saving = true;
+      this.dag_working = "loading";
       await this.fetch()
     } catch (e) {
       console.error(e);
     }
-    this.dag_saving = false;
+    this.dag_working = "idling";
   }
 
   get self_bind() {
@@ -665,10 +681,6 @@ export default class Draggable extends Vue {
     }
     this.flush_graph()
   }
-
-  link_dictionary: { [key: string]: D.GrabLink } = {}
-
-  link_map: D.LinkMap = {};
 
   /**
    * ノード　origin に出入りするリンクを更新する

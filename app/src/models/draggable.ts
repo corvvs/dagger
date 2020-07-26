@@ -228,6 +228,8 @@ export function align_by_d3_dag(sorted_nodes: GrabNode[], link_map: LinkMap, rev
       parentIds: Object.keys(reverse_link_map[n.id] || {}),
     }))
   );
+  let wmax = 0;
+  let hmax = 0;
   let xmin = Infinity;
   let ymin = Infinity;
   let xmax = -Infinity;
@@ -237,8 +239,11 @@ export function align_by_d3_dag(sorted_nodes: GrabNode[], link_map: LinkMap, rev
     if (n.y < ymin) { ymin = n.y }
     if (xmax < n.x) { xmax = n.x }
     if (ymax < n.y) { ymax = n.y }
+    if (wmax < n.width) { wmax = n.width }
+    if (hmax < n.height) { hmax = n.height }
   });
-  const layouter = d3_dag.sugiyama(dag).nodeSize([60, 60]);
+  console.log({ wmax, hmax })
+  const layouter = d3_dag.sugiyama(dag).nodeSize([hmax + 50, wmax + 50]);
   layouter(dag);
 
   let xmin2 = Infinity;

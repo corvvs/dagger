@@ -10,7 +10,8 @@ g.node(
       @mouseenter.stop="mouseEnter($event)"
       @mouseleave.stop="mouseLeave($event)"
     )
-  text(transform="translate(4,20)") {{ node.title }}
+  g(transform="translate(4,20)")
+    text(v-for="(line,i) in format_svg_text_multiline(node.title)" :transform="`translate(0,${i * 20})`") {{ line }}
 
   g.resizer(v-if="status.selected")
     rect.edge(v-for="rb in resizer_binds" :key="rb.resizeMode"
@@ -33,6 +34,7 @@ import _ from "lodash";
 import { reactive, ref, Ref, SetupContext, defineComponent, onMounted, PropType, watch, computed } from '@vue/composition-api';
 import { Prop, Component, Vue } from 'vue-property-decorator';
 import * as D from "@/models/draggable";
+import * as F from "@/formatter"
 
 const edgeWidth = 5;
 
@@ -53,6 +55,8 @@ export default defineComponent({
     status: D.GrabNodeStatus;
   }, context: SetupContext) {
     return {
+      ...F.useFormatter(),
+      
       resizer_binds: computed(() => {
         const node = prop.node;
         return [

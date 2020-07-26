@@ -15,5 +15,9 @@ export const useFormatter = () => {
     format_epoch(epoch_ms: number, format: string) {
       return moment(epoch_ms).format(format);
     },
+
+    format_svg_text_multiline(text: string) {
+      return text.split(/\n/);
+    }
   };
 };
