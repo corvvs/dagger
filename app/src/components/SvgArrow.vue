@@ -4,6 +4,13 @@ g.sharp-arrow(v-if="status && showable && g_bind" v-bind="g_bind")
   line.head(v-bind="arrowhead_bind.u")
   line.head(v-bind="arrowhead_bind.d")
   text(v-if="text_attr" v-bind="text_attr.bind") {{ text_attr.text }}
+  g.out
+    rect(
+      v-bind="out_bind"
+      @mousedown.stop="mouseDown($event)"
+      @mouseenter.stop="mouseEnter($event)"
+      @mouseleave.stop="mouseLeave($event)"
+    )
 </template>
 
 <script lang="ts">
@@ -29,7 +36,36 @@ type ArrowStatus = {
 
   stroke?: string;
   stroke_width?: number;
+  stroke_opacity?: number;
+  stroke_dasharray?: string;
 };
+
+const handlers = (prop: {
+    arrow_id?: string;
+  }, context: SetupContext) => {
+  return {
+    mouseDown(event: MouseEvent) {
+      const arrow_id = prop.arrow_id;
+      if (!arrow_id) { return; }
+      context.emit("arrowMouseDown", { event, arrow_id });
+    },
+    mouseEnter(event: MouseEvent) {
+      const arrow_id = prop.arrow_id;
+      if (!arrow_id) { return; }
+      context.emit("arrowMouseEnter", { event, arrow_id });
+    },
+
+    mouseLeave(event: MouseEvent) {
+      const arrow_id = prop.arrow_id;
+      if (!arrow_id) { return; }
+      context.emit("arrowMouseLeave", { event, arrow_id });
+    },
+  };
+};
+
+function svg_attr_binder(status: ArrowStatus) {
+  return _(status).pick("stroke", "stroke_width", "stroke_opacity", "stroke_dasharray").mapKeys((v,key) => key.replace(/_/g, "-")).value();
+}
 
 export default defineComponent({
   props: {
@@ -39,15 +75,23 @@ export default defineComponent({
     to: {
       type: Object as PropType<D.GrabNode>
     },
+    arrow_id: {
+      type: String
+    },
     status: {
       type: Object as PropType<ArrowStatus>,
     },
+    selected: { type: Boolean, },
+    over: { type: Boolean, },
   },
 
   setup(prop: {
-    from: D.GrabNode,
-    to: D.GrabNode,
+    from: D.GrabNode;
+    to: D.GrabNode;
+    arrow_id?: string;
     status: ArrowStatus;
+    selected?: boolean;
+    over?: boolean;
   }, context: SetupContext) {
 
     /**
@@ -102,7 +146,21 @@ export default defineComponent({
       return Math.atan2(vector.y1 - vector.y2, vector.x1 - vector.x2) * 180 / Math.PI;
     });
 
+    const shaft_bind = computed(() => {
+      const status = prop.status;
+      const vector = arrow_vector.value
+      if (!vector) { return null; }
+      const r = Math.sqrt(Math.pow(vector.x2 - vector.x1, 2) + Math.pow(vector.y2 - vector.y1, 2));
+      return {
+        x1: 0, y1: 0, x2: r, y2: 0,
+        ...svg_attr_binder(status),
+      };
+    });
+
+
     return {
+      ...handlers(prop, context),
+
       showable: computed(() => {
         const vector = arrow_vector.value;
         return vector && [vector.x1, vector.y1, vector.x2, vector.y2].every(v => _.isFinite(v));
@@ -116,19 +174,19 @@ export default defineComponent({
         };
       }),
 
-      /**
-       * 
-       */
-      shaft_bind: computed(() => {
-        const status = prop.status;
-        const vector = arrow_vector.value
-        if (!vector) { return null; }
-        const r = Math.sqrt(Math.pow(vector.x2 - vector.x1, 2) + Math.pow(vector.y2 - vector.y1, 2));
+      shaft_bind,
+
+      out_bind: computed(() => {
+        const shaft = shaft_bind.value;
+        if (!shaft) { return null }
+        const thickness = 8;
         return {
-          x1: 0, y1: 0, x2: r, y2: 0,
-          stroke: status.stroke,
-          stroke_width: status.stroke_width,
-        };
+          x: shaft.x1 - thickness,
+          y: shaft.y1 - thickness,
+          width: shaft.x2 - shaft.x1 + 2 * thickness,
+          height: shaft.y2 - shaft.y1 + 2 * thickness,
+          opacity: prop.selected ? 1 : prop.over ? 0.8 : 0,
+        }
       }),
 
       arrowhead_bind: computed(() => {
@@ -148,21 +206,19 @@ export default defineComponent({
           u: {
             x1: head_x, y1: 0,
             x2: head_x + xc - ys, y2: xs + yc,
-            stroke: status.stroke,
-            stroke_width: status.stroke_width,
+            ...svg_attr_binder(status),
           },
           d: {
             x1: head_x, y1: 0,
             x2: head_x + xc + ys, y2: -xs + yc,
-            stroke: status.stroke,
-            stroke_width: status.stroke_width,
+            ...svg_attr_binder(status),
           },
         };
       }),
 
       text_attr: computed(() => {
         const status = prop.status;
-        const text = status.name || "TEST";
+        const text = status.name;
         const vector = arrow_vector.value;
         if (!text || !vector) { return null; }
         const r = Math.sqrt(Math.pow(vector.x1 - vector.x2, 2) + Math.pow(vector.y1 - vector.y2, 2));
@@ -181,7 +237,12 @@ export default defineComponent({
 });
 </script>
 
-<style scoped lang="stylus">
-.head, .shaft
-  pointer-events none
+<style scoped lang="stylus"> 
+  text
+    user-select none
+  .out
+    rect
+      fill rgba(1,1,1,0)
+      stroke #bbb
+      stroke-width 1px
 </style>

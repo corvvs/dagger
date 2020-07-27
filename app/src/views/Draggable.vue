@@ -15,7 +15,7 @@
           :style="{ 'pointer-events': lock_on ? 'none' : 'auto' }"
           :transform="field_transform"
         )
-          g.snap(v-if="action_mode === 'move' && offset.snap")
+          g.snap(v-if="action_mode === 'move_node' && offset.snap")
             g.horizontal
               line(
                 v-if="typeof offset.snap.y === 'number'"
@@ -37,27 +37,35 @@
 
           g.anchors
             g.anchor_from(v-for="(anchor, id) in link_dictionary" :key="id")
-              SvgArrow(v-bind="link_binds[id]")
+              SvgArrow(
+                v-bind="link_binds[id]"
+                @arrowMouseDown="mouseDownArrow"
+                @arrowMouseEnter="mouseEnterArrow"
+                @arrowMouseLeave="mouseLeaveArrow"
+              )
 
           g.nodes
             SvgGrabNode(v-for="node in nodes" :key="node.id"
               :node="node"
               :status="node_status_map[node.id]"
-              @grabMouseDownBody="mouseDownNode"
-              @grabMouseDownResizer="mouseDownResizer"
-              @grabMouseEnter="mouseEnterNode"
-              @grabMouseLeave="mouseLeaveNode"
+              @nodeMouseDownBody="mouseDownNode"
+              @nodeMouseDownResizer="mouseDownResizer"
+              @nodeMouseEnter="mouseEnterNode"
+              @nodeMouseLeave="mouseLeaveNode"
             )
-            g.linker(v-if="action_mode === 'link' && selected_node && anchored_point")
+            g.linker(v-if="action_mode === 'link_from' && selected_node && anchored_point")
                 SvgArrow(
                   :status="{ x1: selected_node.x + selected_node.width/2, y1: selected_node.y + selected_node.height/2, x2: anchored_point.x, y2: anchored_point.y, stroke: 'red' }"
                 )
 
 
-      .node-panel(v-if="selected_node" :style="{ left: `${selected_node.x - 5 + offset.field.x}px`, top: `${selected_node.y - 40 + offset.field.y}px` }")
+      .node-panel(
+        v-if="selected_node"
+        :style="{ left: `${selected_node.x - 5 + offset.field.x}px`, top: `${selected_node.y - 40 + offset.field.y}px` }"
+      )
         v-btn(small icon
-          @click="start_linking(selected_node)"
-          :color="action_mode === 'link' ? 'info' : 'grey'"
+          @click="start_linking(selected_node.id)"
+          :color="action_mode === 'link_from' ? 'info' : 'grey'"
           dark
           title="リンク"
         )
@@ -80,6 +88,19 @@
           title="削除"
         )
           v-icon delete
+
+      .link-panel(
+        v-if="selected_link && link_binds[selected_link.id]"
+        :style="{ left: `${link_binds[selected_link.id].center.x + offset.field.x}px`, top: `${link_binds[selected_link.id].center.y + offset.field.y}px` }"
+      )
+        v-btn(small icon
+          color="red"
+          @click="delete_link(selected_link, true)"
+          title="削除"
+        )
+          v-icon delete
+
+
   .right_pane
     h4 I/O
     h5 {{ dag.id }}
@@ -107,11 +128,16 @@
       v-slider(v-model="field_zoom_level" label="Field Zoom" :min="-4" :max="4" step="0" :messages="`${field_zoom_level}`")
       .subpanel
         v-text-field(v-model="title" label="Graph Title")
-      .subpanel
+      .subpanel(v-if="selected_node")
         .line
           .name Selected Node
-          .value {{ selected_node_id || "(none)" }}
-        v-textarea(v-if="selected_node" v-model="selected_node.title" label="Node Title")
+          .value {{ selected_node.id }}
+        v-textarea(v-model="selected_node.title" label="Node Title")
+      .subpanel(v-if="selected_link")
+        .line
+          .name Selected Link
+          .value {{ selected_link.id }}
+        v-text-field(v-model="selected_link.title" label="Link Title")
         
     .panel.status
       .line
@@ -121,11 +147,8 @@
         .name Resize Mode
         .value ({{ resizing_mode_vertical }}, {{ resizing_mode_horizontal }})
       .line
-        .name Dragging Node
-        .value {{ dragging_node_id || "(none)" }}
-      .line
-        .name Overred Node
-        .value {{ over_node ? over_node.id : "(none)" }}
+        .name Over Entity
+        .value {{ over_entity || "(none)" }}
       .line
         .name Field Offset
         .value {{ offset.field || "(none)" }}
@@ -152,6 +175,11 @@ import SvgGrabNode from "@/components/SvgGrabNode.vue";
 import SvgArrow from "@/components/SvgArrow.vue";
 import anime from 'animejs'
 import * as Auth from "@/models/auth";
+
+type Entity = {
+  type: "Node" | "Link";
+  id: string;
+};
 
 function makeGrabNode(overwrite: Partial<D.GrabNode> = {}) {
   return {
@@ -230,35 +258,38 @@ export default class Draggable extends Vue {
 
   node_status_map: { [key: string]: D.GrabNodeStatus } = {};
   node_status(node: D.GrabNode): D.GrabNodeStatus {
-    const selected = this.selected_node_id === node.id;
-    const linking = this.action_mode === "link";
-    const overred = !!(this.over_node && this.over_node.id === node.id);
+    const selected_entity = this.selected_entity;
+    const selected = !!(selected_entity && selected_entity.id === node.id);
+    const linking = this.action_mode === "link_from";
+    const overred = !!(this.over_entity && this.over_entity.id === node.id);
     const linkable_from_selected = linking && this.linkable_from_selected(node);
     const is_source = !this.reverse_link_map[node.id];
     const is_sink = !this.link_map[node.id];
     return {
       selected,
       overred,
-      resizing: selected && this.action_mode === "resize",
+      resizing: selected && this.action_mode === "resize_node",
       reachable_from_selected: !!(this.reachable_map && this.reachable_map.from_selected[node.id]),
       reachable_to_selected: !!(this.reachable_map && this.reachable_map.to_selected[node.id]),
       neighboring_with_selected: !!(this.reachable_map && this.reachable_map.to_neighboring_link[node.id]),
       linkable_from_selected,
       not_linkable_from_selected: linking && !this.linkable_from_selected(node),
       link_targeted: !!(!selected && linkable_from_selected && overred),
-      source_sink: this.selected_node_id ? null : is_source ? "source" : is_sink ? "sink" : null,
+      source_sink: !!selected_entity ? null : is_source ? "source" : is_sink ? "sink" : null,
     };
   }
   flush_graph() {
     this.node_status_map = {};
-    this.nodes.forEach(node => this.set_node_status(node));
+    this.nodes.forEach(node => this.set_node_status(node.id));
     _.each(this.link_map, (submap, fid) => {
       _.each(submap, (link, tid)  => {
         this.link_binds[link.id] = this.link_bind(link);
       });
     });
   }
-  set_node_status(node: D.GrabNode) {
+  set_node_status(node_id: string) {
+    const node = this.node_map[node_id];
+    if (!node) { return }
     Vue.set(this.node_status_map, node.id, this.node_status(node))
   }
 
@@ -277,6 +308,22 @@ export default class Draggable extends Vue {
    */
   reachable_nodes(dir: "from" | "to", origin_node: D.GrabNode) {
     return D.survey_reachablility(origin_node, this.node_map, dir === "from" ? this.link_map : this.reverse_link_map);
+  }
+
+  get selected_node() {
+    if (!this.selected_entity) { return null; }
+    return this.node_map[this.selected_entity.id] || null;
+  }
+
+
+  get selected_link() {
+    if (!this.selected_entity) { return null; }
+    return this.link_dictionary[this.selected_entity.id] || null;
+  }
+
+  get selected_link_bind() {
+    if (!this.selected_entity) { return null; }
+    return this.link_binds[this.selected_entity.id] || null;
   }
 
   get reachable_map() {
@@ -312,7 +359,7 @@ export default class Draggable extends Vue {
   }
 
   linkable_from_selected(to: D.GrabNode) {
-    if (!this.selected_node || this.action_mode !== "link" || !this.reachable_map) { return false; }
+    if (!this.selected_node || this.action_mode !== "link_from" || !this.reachable_map) { return false; }
     if (this.selected_node.id === to.id) { return false; }
     if (this.reachable_map.to_selected[to.id]) { return false; }
     if (this.reachable_map.from_selected[to.id] <= 1) { return false; }
@@ -355,9 +402,9 @@ export default class Draggable extends Vue {
   get self_bind() {
     const r = {
       class: _.compact([
-        this.action_mode || "neutral",
+        this.action_mode || "select_field",
         this.resizing_mode,
-        this.mouseDowningField ? "dragging-field" : "",
+        this.action_mode === "move_field" ? "dragging-field" : "",
       ]),
     };
     return r;
@@ -377,38 +424,31 @@ export default class Draggable extends Vue {
     const connected = !!(this.reachable_map && (this.reachable_map.from_connected_link[anchor.id] || this.reachable_map.to_connected_link[anchor.id]));
     // console.log(anchor.id, neighboring, connected)
     const stroke_attr = this.selected_node ? {
-      stroke: (neighboring ? "#111" : connected ? "#444" : "#eee"),
-      "stroke-dasharray": !neighboring && connected ? "3 2" : "",
+      stroke: "#111",
+      stroke_opacity: (neighboring ? "1" : connected ? "0.6" : "0.1"),
+      stroke_dasharray: !neighboring && connected ? "3 2" : "",
     } : {
-      stroke: "#666",
+      stroke: "#111",
+      stroke_opacity: 0.5,
     };
 
     return {
       status: {
-        name: anchor.id,
         arrowheadPosition: 0.8,
         ...stroke_attr,
+        name: anchor.title,
       },
       from: node_from,
       to: node_to,
+      arrow_id: anchor.id,
+      selected: this.selected_entity && this.selected_entity.id === anchor.id,
+      over: this.over_entity && this.over_entity.id === anchor.id,
+      center: { x: (node_from.x + node_to.x) / 2, y: (node_from.y + node_to.y) / 2 },
     };
-  }
-
-  selected_node_id: string = ""
-  get selected_node() { return this.node_map[this.selected_node_id] }
-  @Watch("selected_node_id")
-  changed_selected_node_id() {
-    this.flush_graph()
-    if (this.selected_node_id) {
-      const nodes = this.nodes.filter(n => n.id !== this.selected_node_id)
-      this.x_sorted_nodes = _.sortBy(nodes.map(n => ({ t: n.x + n.width / 2, node: n })), n => n.t);
-      this.y_sorted_nodes = _.sortBy(nodes.map(n => ({ t: n.y + n.height / 2, node: n })), n => n.t);
-    }
   }
   
   x_sorted_nodes: { t: number, node: D.GrabNode }[] = [];
   y_sorted_nodes: { t: number, node: D.GrabNode }[] = [];
-  dragging_node_id: string = ""
 
   /**
    * ノードのドラッグ時にスナップするかどうか
@@ -416,9 +456,9 @@ export default class Draggable extends Vue {
   snap_on = false
   lock_on = false
 
-  action_mode: D.ActionMode = "neutral"
+  action_mode: D.ActionMode = "select_field"
   @Watch("action_mode")
-  changed_selection_mode() {
+  changed_action_mode() {
     this.flush_graph()
   }
 
@@ -427,7 +467,7 @@ export default class Draggable extends Vue {
   get resizing_mode() {
     return (this.resizing_mode_vertical || "") + (this.resizing_mode_horizontal || "")
   }
-  over_node: D.GrabNode | null = null
+
   offset: {
     /**
      * マウスカーソルの現在位置
@@ -463,11 +503,12 @@ export default class Draggable extends Vue {
   get anchored_point() {
     const svg: any = this.$refs.svg;
     const rect = svg.getBoundingClientRect();
-    if (this.action_mode === "link") {
-      if (this.selected_node && this.over_node && D.linkable(this.selected_node, this.over_node, this.link_map)) {
+    if (this.action_mode === "link_from") {
+      const over_node = this.over_entity && this.over_entity.type === "Node" ? this.node_map[this.over_entity.id] : null;
+      if (this.selected_node && over_node && D.linkable(this.selected_node, over_node, this.link_map)) {
         return {
-          x: this.over_node.x + this.over_node.width/2,
-          y: this.over_node.y + this.over_node.height/2,
+          x: over_node.x + over_node.width/2,
+          y: over_node.y + over_node.height/2,
         };
       }
     }
@@ -481,19 +522,22 @@ export default class Draggable extends Vue {
    * MouseMove
    */
   mm(event: MouseEvent) {
-    if (this.action_mode === "neutral") {
-      if (this.mouseDowningField && this.offset.cursor) {
-        // フィールド
-        this.offset.field.x += event.clientX - this.offset.cursor.x;
-        this.offset.field.y += event.clientY - this.offset.cursor.y;
-        this.offset.cursor = { x: event.clientX, y: event.clientY }
-      }
-      return
-    }
+    this.transition_state(event, "mousemove", this.selected_entity);
     const x = event.clientX, y = event.clientY;
+
     switch (this.action_mode) {
-      case "move": {
-        const node = this.node_map[this.dragging_node_id];
+      case "move_field": {
+        if (this.offset.cursor) {
+          // フィールド
+          this.offset.field.x += x - this.offset.cursor.x;
+          this.offset.field.y += y - this.offset.cursor.y;
+          this.offset.cursor = { x, y }
+        }
+        break
+      }
+      case "move_node": {
+        if (!this.selected_node) { break }
+        const node = this.node_map[this.selected_node.id];
         if (!node || !this.offset.inner) { break }
         const lx = x - this.offset.inner.x;
         const ly = y - this.offset.inner.y;
@@ -515,11 +559,11 @@ export default class Draggable extends Vue {
           node.y = ly; 
         }
         this.flip_node_to("front", node);
-        this.update_links(node);
+        this.update_links_about(node);
         break;
       }
-      case "resize": {
-        const node = this.node_map[this.dragging_node_id];
+      case "resize_node": {
+        const node = this.selected_node;
         if (!node || !this.offset.cursor) { break; }
         let touched_x = false;
         let touched_y = false
@@ -548,93 +592,136 @@ export default class Draggable extends Vue {
           }
         }
         if (touched_x || touched_y) {
-          this.update_links(node);
+          this.update_links_about(node);
         }
         break;
       }
-      case "link": {
+      case "link_from": {
         this.offset.cursor = { x, y };
         break;
       }
     }
   }
   debouncedMouseMove = _.throttle(this.mm, 33);
-  // d_mm = _.throttle(_.debounce(this.mm, 34), 34);
 
-
-  mouseDowningField = false
 
   /**
    * フィールド上 mousedown
    */
   mouseDownField(event: MouseEvent) {
-    if (this.selected_node_id) {
-      this.selected_node_id = ""
-      this.action_mode = "neutral"
-      this.resizing_mode_horizontal = null
-      this.resizing_mode_vertical = null
-    }
-    this.mouseDowningField = true
-    this.offset.cursor = { x: event.clientX, y: event.clientY };
+    this.transition_state(event, "mousedown", null)
   }
 
   mouseDownNode(arg: { event: MouseEvent, node: D.GrabNode }) {
     // console.log(arg.event.type, this.action_mode)
     const { event, node } = arg;
-    if (this.action_mode === "link") {
+    if (this.action_mode === "link_from") {
       if (this.selected_node && D.linkable(this.selected_node, node, this.link_map)) {
         this.set_link(this.selected_node, node)
       }
     } else {
-      this.dragging_node_id = node.id
-      this.offset.inner = { x: Math.floor(event.clientX - node.x), y: Math.floor(event.clientY - node.y) }; 
-      this.action_mode = "move"
-      this.selected_node_id = node.id
-      this.resizing_mode_horizontal = null
-      this.resizing_mode_vertical = null
+      this.transition_state(event, "mousedown", this.over_entity)
+      if (this.action_mode === "select_node") {
+        this.offset.inner = { x: Math.floor(event.clientX - node.x), y: Math.floor(event.clientY - node.y) }; 
+        this.offset.cursor = { x: event.clientX, y: event.clientY };
+        this.changed_action_mode()
+      }
     }
-    this.offset.cursor = { x: event.clientX, y: event.clientY };
   }
 
   mouseDownResizer(arg: { event: MouseEvent, node: D.GrabNode, resizeVertical?: "n" | "s", resizeHorizontal?: "w" | "e" }) {
     // console.log(arg.event.type, this.action_mode)
     const { event, node, resizeVertical, resizeHorizontal } = arg;
-    this.dragging_node_id = node.id
     this.offset.inner = { x: Math.floor(event.clientX - node.x), y: Math.floor(event.clientY - node.y) }; 
-    this.action_mode = "resize"
-    this.selected_node_id = node.id
-    this.resizing_mode_vertical = resizeVertical || null
-    this.resizing_mode_horizontal = resizeHorizontal || null
-    this.set_node_status(node)
-    this.offset.cursor = { x: event.clientX, y: event.clientY };
+    // console.log(arg, this.action_mode)
+    this.transition_state(event, "mousedown_on_resizer", this.selected_entity)
+    if (this.action_mode !== "resize_node") { return }
+    this.resizing_mode_vertical = arg.resizeVertical || null;
+    this.resizing_mode_horizontal = arg.resizeHorizontal || null;
+    this.set_node_status(node.id)
   }
 
   mouseUpField(event: MouseEvent) {
-    this.dragging_node_id = ""
-    this.resizing_mode_horizontal = null
-    this.resizing_mode_vertical = null
-    this.offset.inner = null;
-    this.mouseDowningField = false
+    this.transition_state(event, "mouseup", null);
   }
 
   mouseEnterNode(arg: { event: MouseEvent, node: D.GrabNode }) {
     // console.log(arg.event.type, this.action_mode)
+    // if (this.action_mode !== "select_field") { return; }
     const node = arg.node;
-    // if (this.action_mode === "link") {
-      if (!this.over_node || this.over_node.id !== node.id) {
-        this.over_node = node
-        this.set_node_status(node)
-      }
-    // }
+    if (!this.over_entity || this.over_entity.id === node.id) {
+      this.over_entity = {
+        type: "Node", id: node.id
+      };
+      this.set_node_status(node.id)
+    }
   }
 
   mouseLeaveNode(arg: { event: MouseEvent, node: D.GrabNode }) {
     // console.log(arg.event.type, this.action_mode)
     const node = arg.node;
-    if (this.over_node && this.over_node.id === node.id) {
-      // console.log(event)
-      this.over_node = null
-      this.set_node_status(node)
+    if (this.over_entity && this.over_entity.id === node.id) {
+      if (this.action_mode !== "move_node" && this.action_mode !== "resize_node") {
+        this.over_entity = null;
+        this.set_node_status(node.id)
+      }
+    }
+  }
+
+  mouseDownArrow(arg: { event: MouseEvent, arrow_id?: string }) {
+    // console.log(arg)
+    if (!arg.arrow_id) { return; }
+    this.transition_state(arg.event, "mousedown", { type: "Link", id: arg.arrow_id });
+  }
+
+  mouseEnterArrow(arg: { event: MouseEvent, arrow_id?: string }) {
+    // if (this.action_mode !== "select_field") { return; }
+    if (!this.over_entity || this.over_entity.id === arg.arrow_id) {
+      this.over_entity = {
+        type: "Link", id: arg.arrow_id!
+      };
+    }
+  }
+
+  mouseLeaveArrow(arg: { event: MouseEvent, arrow_id?: string }) {
+    if (this.over_entity && this.over_entity.id === arg.arrow_id) {
+      this.over_entity = null;
+    }
+  }
+
+  /**
+   * その時の over_entity を選択する。存在しなければ選択解除を試みる。
+   */
+  select_entity(forcely_deselect?: boolean) {
+    if (this.over_entity) {
+      this.selected_entity = this.over_entity;
+    } else if (this.selected_entity || forcely_deselect) {
+      this.selected_entity = null
+    }
+  }
+
+  selected_entity: Entity | null = null
+  @Watch("selected_entity")
+  changed_selected_entity(newValue: typeof Draggable.prototype["over_entity"], oldValue: typeof Draggable.prototype["over_entity"]) {
+    this.changed_entity(newValue, oldValue);
+    this.flush_graph();
+    if (newValue && newValue.type === "Node") {
+      const nodes = this.nodes.filter(n => n.id !== newValue.id)
+      this.x_sorted_nodes = _.sortBy(nodes.map(n => ({ t: n.x + n.width / 2, node: n })), n => n.t);
+      this.y_sorted_nodes = _.sortBy(nodes.map(n => ({ t: n.y + n.height / 2, node: n })), n => n.t);
+    }
+  }
+
+  over_entity: Entity | null = null
+  @Watch("over_entity")
+  changed_entity(newValue: typeof Draggable.prototype["over_entity"], oldValue: typeof Draggable.prototype["over_entity"]) {
+    if (newValue) {
+      if (newValue.type === "Node") { this.set_node_status(newValue.id) }
+      if (newValue.type === "Link") { this.update_link(newValue.id) }
+    }
+    if (oldValue) {
+      if (oldValue.type === "Node") { this.set_node_status(oldValue.id) }
+      if (oldValue.type === "Link") { this.update_link(oldValue.id) }
     }
   }
 
@@ -642,12 +729,12 @@ export default class Draggable extends Vue {
     console.log(arg)
   }
 
-  start_linking(node: D.GrabNode) {
-    if (this.action_mode === "link") {
-      this.action_mode = "neutral";
+  start_linking(node_id: string) {
+    if (this.action_mode === "link_from") {
+      this.action_mode = "select_field";
     } else {
-      this.selected_node_id = node.id;
-      this.action_mode = "link";
+      // this.select_entity()
+      this.action_mode = "link_from";
       this.offset.cursor = null;
     }
   }
@@ -694,7 +781,7 @@ export default class Draggable extends Vue {
   /**
    * ノード　origin に出入りするリンクを更新する
    */
-  update_links(origin: D.GrabNode) {
+  update_links_about(origin: D.GrabNode) {
     if (this.link_map[origin.id]) {
       _.each(this.link_map[origin.id], link => this.link_binds[link.id] = this.link_bind(link))
     }
@@ -703,9 +790,10 @@ export default class Draggable extends Vue {
     }
   }
 
-  @Watch("link_map")
-  udt() {
-    console.log(Date.now())
+  update_link(link_id: string) {
+    const link = this.link_dictionary[link_id];
+    if (!link) { return; }
+    this.link_binds[link_id] = this.link_bind(link);
   }
 
   get reverse_link_map() {
@@ -723,10 +811,12 @@ export default class Draggable extends Vue {
     return rm;
   }
 
-  delete_link(link: D.GrabLink) {
+  delete_link(link: D.GrabLink, doConfirm = false) {
+    if (doConfirm && !confirm("このリンクを削除します。")) { return }
     Vue.delete(this.link_dictionary, link.id);
     Vue.delete(this.link_binds, link.id);
     Vue.delete(this.link_map[link.from_id], link.to_id);
+    this.flush_graph();
   }
 
   delete_node(node: D.GrabNode) {
@@ -741,6 +831,7 @@ export default class Draggable extends Vue {
     }
     Vue.delete(this.node_status_map, node.id);
     this.nodes.splice(i, 1);
+    this.flush_graph();
   }
 
   animating = false
@@ -793,6 +884,199 @@ export default class Draggable extends Vue {
     }
     this.animating = false;
   }
+
+  /**
+   * 状態を遷移させる
+   */
+  transition_state(
+    event: MouseEvent,
+    event_type: "mouseup" | "mousedown" | "mousemove" | "mousedown_on_resizer" | "click_button_link",
+    entity: Entity | null,
+    recursion = 0
+    ) {
+    if (recursion > 1) { return }
+    const change_state = (new_state: D.ActionMode) => {
+      console.log(`[st] ${this.action_mode} -> ${new_state}`)
+      this.action_mode = new_state;
+      switch (new_state) {
+        case "select_field": {
+          this.resizing_mode_horizontal = null
+          this.resizing_mode_vertical = null
+          this.offset.inner = null;
+          break;
+        }
+        case "move_field": {
+          this.offset.cursor = { x: event.clientX, y: event.clientY };
+          break;
+        }
+        case "select_node": {
+          this.resizing_mode_horizontal = null
+          this.resizing_mode_vertical = null
+          break;
+        }
+        case "resize_node": {
+          this.offset.cursor = { x: event.clientX, y: event.clientY };
+          break;
+        }
+      }
+    }
+    switch (this.action_mode) {
+      case "select_field": {
+        if (event_type === "mousedown" && entity) {
+          // - `select_field` -> `select_node`
+          //   - ノードをクリック
+          if (entity.type === "Node") { 
+            change_state("select_node");
+            this.select_entity();
+            return;
+          }
+          // - `select_field` -> `select_link`
+          //   - リンク をクリック
+          if (entity.type === "Link") {
+            change_state("select_link");
+            this.select_entity();
+            return;
+          }
+        }
+        if (!entity && event_type === "mousemove") {
+          // - `select_field` -> `move_field`
+          //   - フィールドの上でマウスダウンしつつマウスを動かす
+          if ((event.buttons & 1) === 1) {
+            change_state("move_field");
+            this.transition_state(event, event_type, entity, recursion + 1);
+            return;
+          }
+        }
+        break;
+      }
+      case "move_field": {
+        // - `move_field` -> `select_field`
+        //   - マウスダウンをやめる
+        if (event_type === "mouseup") {
+            change_state("select_field");
+            this.transition_state(event, event_type, entity, recursion + 1);
+        }
+        break;
+      }
+      case "select_node": {
+        if (event_type === "mousedown") {
+          if (entity && this.selected_entity && entity.id !== this.selected_entity.id) {
+            // - `select_node` -> `select_node`
+            //   - (別の)ノードをクリック
+            if (entity.type === "Node") {
+              change_state("select_node");
+              this.select_entity();
+              return;
+            }
+            // - `select_node` -> `select_link`
+            //   - リンクをクリック
+            if (entity.type === "Link") {
+              change_state("select_link");
+              this.select_entity();
+              return;
+            }
+          }
+          if (!entity) {
+            // - `select_node` -> `select_field`
+            //   - フィールドをクリック
+            change_state("select_field");
+            this.select_entity(true);
+            this.transition_state(event, event_type, entity, recursion + 1);
+            return;
+          }
+        }
+        // - `select_node` -> `link_from`
+        //   - リンクボタンを押す
+        if (event_type === "click_button_link" && entity) {
+          this.start_linking(entity.id);
+          return;
+        }
+
+        // - `select_node` -> `resize_node`
+        //   - リサイザの上でマウスダウンしつつマウスを動かす
+        // console.log(!!entity && entity.type === "Node", event_type === "mousedown_on_resizer")
+        if (entity && entity.type === "Node" && event_type === "mousedown_on_resizer") {
+          change_state("resize_node");
+          // this.transition_state(event, event_type, entity, recursion + 1);
+          return;
+        }
+
+        if (entity && entity.type === "Node" && event_type === "mousemove") {
+          // - `select_node` -> `move_node`
+          //   - 選択対象ノードの上でマウスダウンしつつマウスを動かす
+          if ((event.buttons & 1) === 1) {
+            change_state("move_node");
+            this.transition_state(event, event_type, entity, recursion + 1);
+            return;
+          }
+        }
+
+        break;
+      }
+      case "select_link": {
+        if (event_type === "mousedown") {
+          if (entity && this.selected_entity && entity.id !== this.selected_entity.id) {
+            // - `select_link` -> `select_node`
+            //   - ノードをクリック
+            if (entity.type === "Node") {
+              change_state("select_node");
+              this.select_entity();
+              return;
+            }
+            // - `select_link` -> `select_link`
+            //   - (別の)リンクをクリック
+            if (entity.type === "Link") {
+              change_state("select_link");
+              this.select_entity();
+              return;
+            }
+          }
+          if (!entity) {
+            // - `select_node` -> `select_field`
+            //   - フィールドをクリック
+            change_state("select_field");
+            this.select_entity(true);
+            this.transition_state(event, event_type, entity, recursion + 1);
+            return;
+          }
+        }
+        break;
+      }
+      case "move_node": {
+        // - `move_node` -> `select_node`
+        //   - マウスダウンをやめる
+        if (event_type === "mouseup") {
+            change_state("select_node");
+            this.transition_state(event, event_type, entity, recursion + 1);
+        }
+        break;
+      }
+      case "resize_node": {
+        // - `resize_node` -> `select_node`
+        //   - マウスダウンをやめる
+        if (event_type === "mouseup") {
+            change_state("select_node");
+            this.transition_state(event, event_type, entity, recursion + 1);
+        }
+        break;
+      }
+      case "link_from": {
+        // - `link_from` -> `select_node`
+        //   - リンクボタンを押す
+        if (event_type === "click_button_link" && entity) {
+          this.start_linking(entity.id);
+          return;
+        }
+        // - `link_from` -> `select_field`
+        //   - フィールドをクリック
+        if (!entity && event_type == "mousedown") {
+          change_state("select_field");
+          return;
+        }
+        break;
+      }
+    }
+  }
 }
 </script>
 
@@ -836,7 +1120,7 @@ export default class Draggable extends Vue {
     border 1px solid black
     height 100%
     width 100%
-  .node-panel
+  .node-panel, .link-panel
     position absolute
     word-break keep-all
     white-space nowrap
@@ -879,6 +1163,11 @@ export default class Draggable extends Vue {
           cursor pointer
         &.nonlinkable .nodebody
           cursor not-allowed
+
+.self:not(&.select_field):not(&.select_node):not(&.select_link) .anchors
+  pointer-events none
+.linker
+  pointer-events none
 
 .panel.status
   display flex

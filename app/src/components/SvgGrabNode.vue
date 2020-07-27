@@ -20,11 +20,11 @@ g.node(
       fill="#111" stroke="none" draggable
       @mousedown.stop="mouseDownResizer($event, rb.resizeVertical, rb.resizeHorizontal)"
     )
-  g.outer_edge(v-if="status.overred || status.link_targeted")
+  g.outer_edge(v-if="(status.overred && !status.selected) || status.link_targeted")
     rect.outer_edge_rect(
       :class=""
-      :x="-5" :y="-5"
-      :width="node.width+10" :height="node.height+10"
+      :x="-8" :y="-8"
+      :width="node.width+16" :height="node.height+16"
       fill="none"
     )
 </template>
@@ -105,25 +105,25 @@ export default defineComponent({
       // handlers
       mouseDownBody(event: MouseEvent) {
         const node = prop.node;
-        context.emit("grabMouseDownBody", { event, node });
+        context.emit("nodeMouseDownBody", { event, node });
       },
 
       mouseDownResizer(event: MouseEvent, resizeVertical?: "n" | "s", resizeHorizontal?: "w" | "e") {
         const node = prop.node;
-        context.emit("grabMouseDownResizer", { event, node, resizeVertical, resizeHorizontal });
+        context.emit("nodeMouseDownResizer", { event, node, resizeVertical, resizeHorizontal });
       },
 
       mouseEnter(event: MouseEvent) {
         const node = prop.node;
         if (!prop.status.overred) {
-          context.emit("grabMouseEnter", { event, node });
+          context.emit("nodeMouseEnter", { event, node });
         }
       },
 
       mouseLeave(event: MouseEvent) {
         const node = prop.node;
         if (prop.status.overred) {
-          context.emit("grabMouseLeave", { event, node });
+          context.emit("nodeMouseLeave", { event, node });
         }
       },
     }
@@ -138,10 +138,10 @@ export default defineComponent({
   .nodebody
     fill white
     stroke #888
-  &.source .nodebody
-    fill #efe
-  &.sink .nodebody
-    fill #fee
+  // &.source .nodebody
+  //   fill #efe
+  // &.sink .nodebody
+  //   fill #fee
 
 
   text
