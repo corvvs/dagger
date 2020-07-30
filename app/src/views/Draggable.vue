@@ -15,7 +15,7 @@
           :style="{ 'pointer-events': lock_on ? 'none' : 'auto' }"
           :transform="field_transform"
         )
-          g.snap(v-if="action_mode === 'move_node' && offset.snap")
+          g.snap(v-if="action_state === 'move_node' && offset.snap")
             g.horizontal
               line(
                 v-if="typeof offset.snap.y === 'number'"
@@ -53,36 +53,33 @@
               @nodeMouseEnter="mouseEnterNode"
               @nodeMouseLeave="mouseLeaveNode"
             )
-            g.linker(v-if="action_mode === 'link_from' && selected_node && anchored_point")
-                SvgArrow(
-                  :status="{ x1: selected_node.x + selected_node.width/2, y1: selected_node.y + selected_node.height/2, x2: anchored_point.x, y2: anchored_point.y, stroke: 'red' }"
-                )
+            g.linker(v-if="action_state === 'link_from' && selected_node && anchored_point")
 
 
       .node-panel(
         v-if="selected_node"
-        :style="{ left: `${selected_node.x - 5 + offset.field.x}px`, top: `${selected_node.y - 40 + offset.field.y}px` }"
+        :style="{ left: `${selected_node.x - 5 + offset.field.x}px`, top: `${selected_node.y - 5 + offset.field.y}px` }"
       )
-        v-btn(small icon
+        v-btn(small icon tile
           @click="start_linking(selected_node.id)"
-          :color="action_mode === 'link_from' ? 'info' : 'grey'"
+          :color="action_state === 'link_from' ? 'info' : 'grey'"
           dark
-          title="リンク"
+          title="ここからリンク"
         )
           v-icon(
           dark
           ) link
-        v-btn(small icon
+        v-btn(small icon tile
           @click="flip_node_to('front', selected_node)"
           title="最前面へ"
         )
           v-icon flip_to_front
-        v-btn(small icon
+        v-btn(small icon tile
           @click="flip_node_to('back', selected_node)"
           title="最背面へ"
         )
           v-icon flip_to_back
-        v-btn(small icon
+        v-btn(small icon tile
           color="red"
           @click="delete_node(selected_node)"
           title="削除"
@@ -93,7 +90,7 @@
         v-if="selected_link && link_binds[selected_link.id]"
         :style="{ left: `${link_binds[selected_link.id].center.x + offset.field.x}px`, top: `${link_binds[selected_link.id].center.y + offset.field.y}px` }"
       )
-        v-btn(small icon
+        v-btn(small icon tile
           color="red"
           @click="delete_link(selected_link, true)"
           title="削除"
@@ -125,24 +122,34 @@
         v-btn(x-small @click="lock_on = !lock_on" :color="lock_on ? 'blue info' : ''")
           v-icon(small) lock
           | Lock
-      v-slider(v-model="field_zoom_level" label="Field Zoom" :min="-4" :max="4" step="0" :messages="`${field_zoom_level}`")
+      v-slider(v-model="field_zoom_level" label="Field Zoom" :min="-4" :max="4" step="1" :messages="`${field_zoom_level}`")
       .subpanel
         v-text-field(v-model="title" label="Graph Title")
+
       .subpanel(v-if="selected_node")
         .line
           .name Selected Node
           .value {{ selected_node.id }}
         v-textarea(v-model="selected_node.title" label="Node Title")
+
       .subpanel(v-if="selected_link")
         .line
           .name Selected Link
           .value {{ selected_link.id }}
         v-text-field(v-model="selected_link.title" label="Link Title")
+        h5 Type: {{ selected_link.arrow.type }}
+        v-btn-toggle(v-model="selected_link.arrow.type" mandatory dense tile @change="update_link(selected_link.id)")
+          v-btn(light small text value="direct")
+            v-icon arrow_forward
+          v-btn(light small text value="parallel")
+            v-icon subdirectory_arrow_right
+
         
+    h4 Internal State
     .panel.status
       .line
         .name Action Mode
-        .value {{ action_mode }}
+        .value {{ action_state }}
       .line
         .name Resize Mode
         .value ({{ resizing_mode_vertical }}, {{ resizing_mode_horizontal }})
@@ -229,6 +236,9 @@ export default class Draggable extends Vue {
       this.title = this.dag!.title;
       this.nodes = this.dag!.nodes;
       this.link_map = this.dag!.links;
+      if (this.dag!.field_offset) {
+        this.offset.field = this.dag!.field_offset;
+      }
       this.link_dictionary = {};
       _(this.link_map).values().flatMap(submap => _.values(submap)).value().forEach(link => {
         Vue.set(this.link_dictionary, link.id, link);
@@ -260,7 +270,7 @@ export default class Draggable extends Vue {
   node_status(node: D.GrabNode): D.GrabNodeStatus {
     const selected_entity = this.selected_entity;
     const selected = !!(selected_entity && selected_entity.id === node.id);
-    const linking = this.action_mode === "link_from";
+    const linking = this.action_state === "link_from";
     const overred = !!(this.over_entity && this.over_entity.id === node.id);
     const linkable_from_selected = linking && this.linkable_from_selected(node);
     const is_source = !this.reverse_link_map[node.id];
@@ -268,7 +278,7 @@ export default class Draggable extends Vue {
     return {
       selected,
       overred,
-      resizing: selected && this.action_mode === "resize_node",
+      resizing: selected && this.action_state === "resize_node",
       reachable_from_selected: !!(this.reachable_map && this.reachable_map.from_selected[node.id]),
       reachable_to_selected: !!(this.reachable_map && this.reachable_map.to_selected[node.id]),
       neighboring_with_selected: !!(this.reachable_map && this.reachable_map.to_neighboring_link[node.id]),
@@ -359,7 +369,7 @@ export default class Draggable extends Vue {
   }
 
   linkable_from_selected(to: D.GrabNode) {
-    if (!this.selected_node || this.action_mode !== "link_from" || !this.reachable_map) { return false; }
+    if (!this.selected_node || this.action_state !== "link_from" || !this.reachable_map) { return false; }
     if (this.selected_node.id === to.id) { return false; }
     if (this.reachable_map.to_selected[to.id]) { return false; }
     if (this.reachable_map.from_selected[to.id] <= 1) { return false; }
@@ -378,6 +388,7 @@ export default class Draggable extends Vue {
       this.dag.nodes = this.nodes;
       this.dag.links = this.link_map;
       this.dag.title = this.title;
+      this.dag.field_offset = this.offset.field;
       await D.post_dag(this.auth_state.user, this.dag);
     } catch (e) {
       console.error(e);
@@ -402,9 +413,9 @@ export default class Draggable extends Vue {
   get self_bind() {
     const r = {
       class: _.compact([
-        this.action_mode || "select_field",
+        this.action_state || "select_field",
         this.resizing_mode,
-        this.action_mode === "move_field" ? "dragging-field" : "",
+        this.action_state === "move_field" ? "dragging-field" : "",
       ]),
     };
     return r;
@@ -434,8 +445,14 @@ export default class Draggable extends Vue {
 
     return {
       status: {
-        arrowheadPosition: 0.8,
+        ..._.pick(anchor, "id", "from_id", "to_id"),
+        type: anchor.arrow.type,
         ...stroke_attr,
+        head: {
+          position: 0.5,
+        },
+        shaft: {
+        },
         name: anchor.title,
       },
       from: node_from,
@@ -456,8 +473,8 @@ export default class Draggable extends Vue {
   snap_on = false
   lock_on = false
 
-  action_mode: D.ActionMode = "select_field"
-  @Watch("action_mode")
+  action_state: D.ActionState = "select_field"
+  @Watch("action_state")
   changed_action_mode() {
     this.flush_graph()
   }
@@ -503,7 +520,7 @@ export default class Draggable extends Vue {
   get anchored_point() {
     const svg: any = this.$refs.svg;
     const rect = svg.getBoundingClientRect();
-    if (this.action_mode === "link_from") {
+    if (this.action_state === "link_from") {
       const over_node = this.over_entity && this.over_entity.type === "Node" ? this.node_map[this.over_entity.id] : null;
       if (this.selected_node && over_node && D.linkable(this.selected_node, over_node, this.link_map)) {
         return {
@@ -525,7 +542,7 @@ export default class Draggable extends Vue {
     this.transition_state(event, "mousemove", this.selected_entity);
     const x = event.clientX, y = event.clientY;
 
-    switch (this.action_mode) {
+    switch (this.action_state) {
       case "move_field": {
         if (this.offset.cursor) {
           // フィールド
@@ -613,15 +630,15 @@ export default class Draggable extends Vue {
   }
 
   mouseDownNode(arg: { event: MouseEvent, node: D.GrabNode }) {
-    // console.log(arg.event.type, this.action_mode)
+    // console.log(arg.event.type, this.action_state)
     const { event, node } = arg;
-    if (this.action_mode === "link_from") {
+    if (this.action_state === "link_from") {
       if (this.selected_node && D.linkable(this.selected_node, node, this.link_map)) {
         this.set_link(this.selected_node, node)
       }
     } else {
-      this.transition_state(event, "mousedown", this.over_entity)
-      if (this.action_mode === "select_node") {
+      this.transition_state(event, "mousedown", { ...node, type: "Node" });
+      if (this.action_state === "select_node") {
         this.offset.inner = { x: Math.floor(event.clientX - node.x), y: Math.floor(event.clientY - node.y) }; 
         this.offset.cursor = { x: event.clientX, y: event.clientY };
         this.changed_action_mode()
@@ -630,12 +647,12 @@ export default class Draggable extends Vue {
   }
 
   mouseDownResizer(arg: { event: MouseEvent, node: D.GrabNode, resizeVertical?: "n" | "s", resizeHorizontal?: "w" | "e" }) {
-    // console.log(arg.event.type, this.action_mode)
+    // console.log(arg.event.type, this.action_state)
     const { event, node, resizeVertical, resizeHorizontal } = arg;
     this.offset.inner = { x: Math.floor(event.clientX - node.x), y: Math.floor(event.clientY - node.y) }; 
-    // console.log(arg, this.action_mode)
+    // console.log(arg, this.action_state)
     this.transition_state(event, "mousedown_on_resizer", this.selected_entity)
-    if (this.action_mode !== "resize_node") { return }
+    if (this.action_state !== "resize_node") { return }
     this.resizing_mode_vertical = arg.resizeVertical || null;
     this.resizing_mode_horizontal = arg.resizeHorizontal || null;
     this.set_node_status(node.id)
@@ -646,8 +663,8 @@ export default class Draggable extends Vue {
   }
 
   mouseEnterNode(arg: { event: MouseEvent, node: D.GrabNode }) {
-    // console.log(arg.event.type, this.action_mode)
-    // if (this.action_mode !== "select_field") { return; }
+    // console.log(arg.event.type, this.action_state)
+    // if (this.action_state !== "select_field") { return; }
     const node = arg.node;
     if (!this.over_entity || this.over_entity.id === node.id) {
       this.over_entity = {
@@ -658,10 +675,10 @@ export default class Draggable extends Vue {
   }
 
   mouseLeaveNode(arg: { event: MouseEvent, node: D.GrabNode }) {
-    // console.log(arg.event.type, this.action_mode)
+    // console.log(arg.event.type, this.action_state)
     const node = arg.node;
     if (this.over_entity && this.over_entity.id === node.id) {
-      if (this.action_mode !== "move_node" && this.action_mode !== "resize_node") {
+      if (this.action_state !== "move_node" && this.action_state !== "resize_node") {
         this.over_entity = null;
         this.set_node_status(node.id)
       }
@@ -675,8 +692,7 @@ export default class Draggable extends Vue {
   }
 
   mouseEnterArrow(arg: { event: MouseEvent, arrow_id?: string }) {
-    // if (this.action_mode !== "select_field") { return; }
-    if (!this.over_entity || this.over_entity.id === arg.arrow_id) {
+    if (!this.over_entity || this.over_entity.id !== arg.arrow_id) {
       this.over_entity = {
         type: "Link", id: arg.arrow_id!
       };
@@ -730,11 +746,11 @@ export default class Draggable extends Vue {
   }
 
   start_linking(node_id: string) {
-    if (this.action_mode === "link_from") {
-      this.action_mode = "select_field";
+    if (this.action_state === "link_from") {
+      this.action_state = "select_field";
     } else {
       // this.select_entity()
-      this.action_mode = "link_from";
+      this.action_state = "link_from";
       this.offset.cursor = null;
     }
   }
@@ -764,11 +780,19 @@ export default class Draggable extends Vue {
           Vue.set(this.link_map, from.id , { });
         }
         const id = `${from.id}_${to.id}`;
-        const link = {
+        const link: D.GrabLink = {
           id,
           from_id: from.id,
           to_id: to.id,
           title: "",
+          arrow: {
+            type: "direct",
+            id,
+            from_id: from.id,
+            to_id: to.id,
+            head: {},
+            shaft: {},
+          },
         };
         Vue.set(this.link_map[from.id], to.id, link);
         Vue.set(this.link_dictionary, id, link);
@@ -895,9 +919,9 @@ export default class Draggable extends Vue {
     recursion = 0
     ) {
     if (recursion > 1) { return }
-    const change_state = (new_state: D.ActionMode) => {
-      console.log(`[st] ${this.action_mode} -> ${new_state}`)
-      this.action_mode = new_state;
+    const change_state = (new_state: D.ActionState) => {
+      console.log(`[st] ${this.action_state} -> ${new_state}`)
+      this.action_state = new_state;
       switch (new_state) {
         case "select_field": {
           this.resizing_mode_horizontal = null
@@ -920,7 +944,7 @@ export default class Draggable extends Vue {
         }
       }
     }
-    switch (this.action_mode) {
+    switch (this.action_state) {
       case "select_field": {
         if (event_type === "mousedown" && entity) {
           // - `select_field` -> `select_node`
@@ -1095,16 +1119,18 @@ export default class Draggable extends Vue {
     position relative
     height 100%
   .right_pane
+    border-left 1px solid #bbb
     flex-basis 300px
     flex-grow 0
     flex-shrink 0
+    padding 4px
   
 
 .panel
   flex-shrink 0
   flex-grow 0
-  padding 2px
-  border-bottom 1px solid #888
+  padding 4px
+  border 1px solid #aaa
 .indicator
   flex-shrink 0
   flex-grow 0
@@ -1117,26 +1143,29 @@ export default class Draggable extends Vue {
   overflow hidden
 
   .svgmaster
-    border 1px solid black
+    border none
     height 100%
     width 100%
+    font-size 10px
   .node-panel, .link-panel
     position absolute
     word-break keep-all
     white-space nowrap
-    border 1px solid black
-    background-color white
     opacity 0.75
-    height 30px
+    transform-origin: top center;
+    transform scale(+1,-1)
+    .v-btn
+      transform scale(+1,-1)
+      border solid 1px #888
+      margin 1px
 
 .self
-  &.move .selected .draggable
-    cursor grab
-  &.dragging-field
+  &.move_field, &.move_node
     cursor grab
     user-select none
-
-  &.resize
+    .node-panel
+      pointer-events none
+  &.resize_node
     user-select none
     &.n
       cursor n-resize
@@ -1154,8 +1183,10 @@ export default class Draggable extends Vue {
       cursor se-resize
     &.sw
       cursor sw-resize
+    .node-panel
+      pointer-events none
 
-  &.link
+  &.link_from 
     .node.overred
       &:not(.selected)
         &:not(.nonlinkable) .nodebody

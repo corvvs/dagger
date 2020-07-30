@@ -1,6 +1,7 @@
 import _ from "lodash";
 import { firestore } from "firebase";
 import * as uuid from "uuid";
+import * as Arrow from "@/models/arrow";
 import * as U from "@/util";
 import * as FB from "@/models/fb";
 import * as Auth from "@/models/auth";
@@ -50,8 +51,11 @@ export type GrabLink = {
   id: string;
   from_id: string;
   to_id: string;
-
   title: string;
+
+  distance?: number;
+
+  arrow: Arrow.ArrowData;
 };
 
 export type GrabArrow = {
@@ -79,6 +83,7 @@ export type GrabDAG = {
   created_at: number;
   updated_at: number;
   ver: string;
+  field_offset?: Point;
 };
 
 export type GrabDAGHead = Omit<GrabDAG, "nodes" | "links">;
@@ -92,7 +97,7 @@ export function spawn_lister(user: Auth.User) {
 export type ResizeMode = "n" | "w" | "s" | "e"
   | "nw" | "sw" | "se" | "ne";
 
-export type ActionMode = "select_field" | "move_field" | "select_node" | "select_link" | "move_node" | "resize_node" | "link_from";
+export type ActionState = "select_field" | "move_field" | "select_node" | "select_link" | "move_node" | "resize_node" | "link_from";
 
 /**
  * 点(px, py) を通り、その点から (vx, vy) の方位に延びる直線(向きあり)
@@ -147,21 +152,24 @@ function crossing_point(v: LineParameter, w: LineParameter) {
  * ベクトル *vector* が定義する線分と *node*の張る矩形領域との交点のうち、ベクトル *vector* の根元に近いものを探す
  */
 export function collision_point(vector: Vector, node: GrabNode) {
-  const r = Math.sqrt(Math.pow(vector.to.x - vector.from.x, 2) + Math.pow(vector.to.y - vector.from.y, 2));
   const dx = (vector.to.x - vector.from.x);
   const dy = (vector.to.y - vector.from.y);
 
-  const lines: LineParameter[] = [
-    { px: node.x, py: node.y, vx: 1, vy: 0 },
-    { px: node.x, py: node.y, vx: 0, vy: 1 },
-    { px: node.x + node.width, py: node.y + node.height, vx: 1, vy: 0 },
-    { px: node.x + node.width, py: node.y + node.height, vx: 0, vy: 1 },
+  const lines: (LineParameter & { dir: "n" | "w" | "s" | "e" })[] = [
+    { dir: "n", px: node.x, py: node.y, vx: 1, vy: 0 },
+    { dir: "w", px: node.x, py: node.y, vx: 0, vy: 1 },
+    { dir: "s", px: node.x + node.width, py: node.y + node.height, vx: 1, vy: 0 },
+    { dir: "e", px: node.x + node.width, py: node.y + node.height, vx: 0, vy: 1 },
   ];
 
   const epsilon = 0.001;
-  const edge_lines = _(lines).map(w => crossing_point({
-    px: vector.from.x, py: vector.from.y, vx: dx, vy: dy,
-  }, w)).compact().filter(crossing => {
+  const edge_lines = _(lines).map(w => {
+    const result = crossing_point({
+      px: vector.from.x, py: vector.from.y, vx: dx, vy: dy,
+    }, w);
+    if (!result) { return result; }
+    return { ...result, dir: w.dir };
+  }).compact().filter(crossing => {
     return -epsilon <= crossing.s && crossing.s <= 1 + epsilon // crossing は vectorが乗っている直線に乗っているが、それが線分 vector 上にあるかどうか
         && (crossing.x - node.x >= -epsilon) // crossing が矩形 node の境界線上にあるかどうか
         && (crossing.y - node.y >= -epsilon)
@@ -171,10 +179,7 @@ export function collision_point(vector: Vector, node: GrabNode) {
     return Math.pow(crossing.x - vector.from.x, 2) + Math.pow(crossing.y - vector.from.y, 2)
   }).value();
   if (edge_lines.length === 0) { return null; }
-  return {
-    x: edge_lines[0].x,
-    y: edge_lines[0].y,
-  };
+  return _.pick(edge_lines[0], "x", "y", "dir");
 }
 
 export function new_dag(id?: string): GrabDAG {
@@ -193,12 +198,33 @@ export function post_dag(user: Auth.User, dag: GrabDAG) {
   const now = Date.now();
   dag.created_at = dag.created_at || now;
   dag.updated_at = now;
-  return firestore().collection(`user/${user.uid}/dag`).doc(dag.id).set(dag);
+  const data: any = _.cloneDeep(dag);
+  _.each(data.links, sublinks => {
+    _.each(sublinks, (link, id) => {
+      ["head", "shaft", "arrow"].forEach(key => link[key] = _.omit(link[key], "id", "from_id", "to_id"));
+    });
+  });
+  return firestore().collection(`user/${user.uid}/dag`).doc(dag.id).set(data);
 }
 
 export async function get_dag(user: Auth.User, dag_id: string) {
   const doc = await firestore().collection(`user/${user.uid}/dag`).doc(dag_id).get();
-  return doc.exists ? doc.data() : null;
+  if (!doc.exists) { return null; }
+  const r: any = doc.data();
+  _.each(r.links, (sublinks) => {
+    _.each(sublinks, link => {
+      link.id = `${link.from_id}_${link.to_id}`;
+      if (!link.arrow) {
+        link.arrow = {
+          type: "direct",
+        };
+      }
+      Object.assign(link.arrow, _.pick(link, "id", "from_id", "to_id"));
+      if (!link.arrow.head) { link.arrow.head = {}; }
+      if (!link.arrow.shaft) { link.arrow.shaft = {}; }
+    });
+  });
+  return r;
 }
 
 const d3_dag = require("d3-dag");

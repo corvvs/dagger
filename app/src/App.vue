@@ -5,12 +5,9 @@ v-app#app
       v-list-item(@click.stop="navState.mini = true; go('/f')")
         v-list-item-icon
           v-icon format_list_bulleted
-      v-list-item(@click.stop="navState.mini = true; go('/d')")
-        v-list-item-icon
-          v-icon share
       v-list-item(@click.stop="navState.mini = true; go('/ldag')")
         v-list-item-icon
-          v-icon touch_app
+          v-icon share
       v-list-item(@click.stop="navState.show_user = true")
         v-list-item-icon
           v-icon person
