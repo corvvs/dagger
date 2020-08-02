@@ -22,6 +22,7 @@ type ArrowBase = {
   to_id: string;
 
   type: ArrowType;
+  headless?: true;
 }
 
 type StrokeAttr = {

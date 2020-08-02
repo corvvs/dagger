@@ -125,6 +125,12 @@
       //- v-slider(v-model="field_zoom_level" label="Field Zoom" :min="-4" :max="4" step="1" :messages="`${field_zoom_level}`")
       .subpanel
         v-text-field(v-model="netdata.title" label="Graph Title")
+      .subpanel
+        v-select(
+          v-model="netdata.type" label="Network Type"
+          :items="net_type_item"
+          :readonly="!changable_net_type"
+        )
 
       .subpanel(v-if="selected_node")
         .line
@@ -136,13 +142,13 @@
         .line
           .name Selected Link
           .value {{ selected_link.id }}
-        v-text-field(v-model="selected_link.title" label="Link Title")
-        //- h5 Type: {{ selected_link.arrow.type }}
-        //- v-btn-toggle(v-model="selected_link.arrow.type" mandatory dense tile @change="update_link(selected_link.id)")
-        //-   v-btn(light small text value="direct")
-        //-     v-icon arrow_forward
-        //-   v-btn(light small text value="parallel")
-        //-     v-icon subdirectory_arrow_right
+        v-text-field(v-model="netdata.link_appearance[selected_link.id].title" label="Link Title")
+        h5 Type: {{ netdata.link_appearance[selected_link.id].arrow.type }}
+        v-btn-toggle(v-model="netdata.link_appearance[selected_link.id].arrow.type" mandatory dense tile @change="update_link(selected_link.id)")
+          v-btn(light small text value="direct")
+            v-icon arrow_forward
+          v-btn(light small text value="parallel")
+            v-icon subdirectory_arrow_right
 
         
     h4 Internal State
@@ -272,12 +278,16 @@ export default defineComponent({
     const net: Ref<N.Network.Network | null> = ref(null);
     const netdata: {
       title: string;
+      type: N.Network.Type;
       nodes: Node[];
       link_map: N.Network.LinkMap;
+      link_appearance: N.Network.LinkAppearanceMap;
     } = reactive({
       title: "",
+      type: "UD",
       nodes: [],
       link_map: {},
+      link_appearance: {},
     });
     const node_map = computed(() => {
       return _.keyBy(netdata.nodes, node => node.id);
@@ -360,6 +370,7 @@ export default defineComponent({
       netdata.nodes = [];
       netdata.title = "";
       netdata.link_map = {};
+      netdata.link_appearance = {};
       secondary_data.link_dictionary = {};
       flush_graph();
       if (props.auth_state.user && props.id) {
@@ -372,9 +383,11 @@ export default defineComponent({
         netdata.title = net.value!.title;
         netdata.nodes = net.value!.nodes;
         netdata.link_map = net.value!.links;
+        netdata.link_appearance = net.value!.link_appearance || {};
         if (net.value!.field_offset) {
           offset.field = net.value!.field_offset;
         }
+        netdata.type = net.value!.type || "UD";
         secondary_data.link_dictionary = {};
         _(netdata.link_map).values().flatMap(submap => _.values(submap)).value().forEach(link => {
           Vue.set(secondary_data.link_dictionary, link.id, link);
@@ -405,7 +418,7 @@ export default defineComponent({
       const selected = !!(selected_entity && selected_entity.id === node.id);
       const linking = state.action === "link_from";
       const overred = !!(state.over_entity && state.over_entity.id === node.id);
-      const linkable = !!reachable_map.value && !!snode  && N.Network.is_linkable_from_selected(net.value!.type, reachable_map.value, snode, node);
+      const linkable = !!reachable_map.value && !!snode && N.Network.is_linkable_from_selected(netdata.type, reachable_map.value, snode, node);
       const linkable_from_selected = linking && linkable;
       const is_source = !reverse_link_map.value[node.id];
       const is_sink = !netdata.link_map[node.id];
@@ -427,7 +440,7 @@ export default defineComponent({
     /**
      * *node* から/へ到達可能なnodeの辞書を返す
      */
-    const reachablity = (origin_node: Node) => {
+    const reachability = (origin_node: Node) => {
       return N.Network.survey_reachablility(
         net.value!,
         origin_node,
@@ -465,7 +478,7 @@ export default defineComponent({
     }
 
     const set_link_from_selected = (to: Node) => {
-      if (selected_node.value && reachable_map.value && N.Network.is_linkable_from_selected(net.value!.type, reachable_map.value, selected_node.value, to)) {
+      if (selected_node.value && reachable_map.value && N.Network.is_linkable_from_selected(netdata.type, reachable_map.value, selected_node.value, to)) {
         const from = selected_node.value;
         const submap = netdata.link_map[from.id]
         if (!submap || !submap[to.id]) {
@@ -477,9 +490,19 @@ export default defineComponent({
             id,
             from_id: from.id,
             to_id: to.id,
-            title: "",
           };
+          const appearance: N.Network.LinkAppearance = {
+            id,
+            title: "",
+            arrow: {
+              ...link,
+              type: "direct",
+              head: {},
+              shaft: {},
+            },
+          }
           Vue.set(netdata.link_map[from.id], to.id, link);
+          Vue.set(netdata.link_appearance, id, appearance);
           Vue.set(secondary_data.link_dictionary, id, link);
           Vue.set(secondary_data.link_binds, id, link_bind(link));
         }
@@ -690,11 +713,12 @@ export default defineComponent({
           secondary_data.link_binds[link.id] = link_bind(link);
         });
       });
+      console.log("flushed.")
     }
 
     const reachable_map = computed(() => {
       if (!selected_node.value) { return null }
-      return reachablity(selected_node.value)
+      return reachability(selected_node.value)
     });
 
     const link_bind = (anchor: Link) => {
@@ -714,19 +738,20 @@ export default defineComponent({
         stroke: "#111",
         stroke_opacity: 0.5,
       };
+      const appearance = netdata.link_appearance[anchor.id];
 
       return {
         status: {
           ..._.pick(anchor, "id", "from_id", "to_id"),
-          // type: anchor.arrow.type,
-          type: "direct",
+          type: appearance.arrow.type,
           ...stroke_attr,
           head: {
             position: 0.5,
           },
           shaft: {
           },
-          name: anchor.title,
+          name: appearance.title,
+          headless: !N.Network.netAttr(netdata.type).directed,
         },
         from: node_from,
         to: node_to,
@@ -755,7 +780,7 @@ export default defineComponent({
         // console.log(arg.event.type, state.action)
         const { event, node } = arg;
         if (state.action === "link_from" && selected_node.value && reachable_map.value) {
-          if (selected_node.value && N.Network.is_linkable_from_selected(net.value!.type, reachable_map.value, selected_node.value, node)) {
+          if (selected_node.value && N.Network.is_linkable_from_selected(netdata.type, reachable_map.value, selected_node.value, node)) {
             set_link_from_selected(node)
           }
         } else {
@@ -932,6 +957,29 @@ export default defineComponent({
       }
     }
 
+    const delete_link = (link: Link, doConfirm = false) => {
+      if (doConfirm && !confirm("このリンクを削除します。")) { return }
+      Vue.delete(secondary_data.link_dictionary, link.id);
+      Vue.delete(secondary_data.link_binds, link.id);
+      Vue.delete(netdata.link_map[link.from_id], link.to_id);
+      flush_graph();
+    };
+    const delete_node = (node: Node) => {
+      const i = netdata.nodes.findIndex(n => n.id === node.id);
+      if (i < 0) { return }
+      if (!confirm("このノードと、このノードに出入りするリンクを削除します。")) { return }
+      if (netdata.link_map[node.id]) {
+        _.each(netdata.link_map[node.id], (link) => delete_link(link));
+      }
+      if (reverse_link_map.value[node.id]) {
+        _.each(reverse_link_map.value[node.id], (link) => delete_link(link));
+      }
+      Vue.delete(secondary_data.node_status_map, node.id);
+      netdata.nodes.splice(i, 1);
+      flush_graph();
+    };
+
+    watch(() => netdata.type, () => flush_graph());
     watch(() => state.action, () => flush_graph());
     watch(() => props.auth_state.user, () => fetch());
     watch(() => props.id, () => fetch());
@@ -975,7 +1023,7 @@ export default defineComponent({
         const rect = svg.getBoundingClientRect();
         if (state.action === "link_from") {
           const over_node = state.over_entity && state.over_entity.type === "Node" ? node_map.value[state.over_entity.id] : null;
-          if (reachable_map.value && selected_node.value && over_node && N.Network.is_linkable_from_selected(net.value!.type, reachable_map.value, selected_node.value, over_node)) {
+          if (reachable_map.value && selected_node.value && over_node && N.Network.is_linkable_from_selected(netdata.type, reachable_map.value, selected_node.value, over_node)) {
             return {
               x: over_node.x + over_node.width/2,
               y: over_node.y + over_node.height/2,
@@ -990,7 +1038,10 @@ export default defineComponent({
       selected_node,
       selected_link,
       savable: computed(() => { return !!net.value && !!props.auth_state.user && state.working === "idling"; }),
+      reachable_map,
+      changable_net_type: computed(() => N.Network.changable_type(netdata.link_map)),
 
+      net_type_item: computed(() => (["UD", "F", "D", "DA"] as const).map(type => ({ value: type, text: N.Network.typeName[type] }))),
 
       // methods
       add_new_node,
@@ -999,6 +1050,8 @@ export default defineComponent({
       start_linking,
       update_link,
       flip_node_to,
+      delete_link,
+      delete_node,
 
       // I/O
       async save() {
@@ -1007,8 +1060,10 @@ export default defineComponent({
         if (state.working !== "idling") { return }
         try {
           state.working = "saving";
+          net.value.type = netdata.type;
           net.value.nodes = netdata.nodes;
           net.value.links = netdata.link_map;
+          net.value.link_appearance = netdata.link_appearance;
           net.value.title = netdata.title;
           net.value.field_offset = offset.field;
           await N.Network.post(props.auth_state.user, net.value);

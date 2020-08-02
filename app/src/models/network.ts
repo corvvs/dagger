@@ -17,7 +17,7 @@ export namespace Network {
     DA: "DAG",
   };
   
-  type Type = keyof typeof typeName;
+  export type Type = keyof typeof typeName;
 
 
   type TypeAttr = {
@@ -46,7 +46,17 @@ export namespace Network {
     nodes: Node[];
     links: LinkMap;
     field_offset: G.Point;
+
+    link_appearance: LinkAppearanceMap;
   }
+
+  export function netAttr(type: Type) {
+    return typeAttr[type];
+  };
+
+  export function changable_type(link_map: LinkMap) {
+    return Object.keys(link_map).length === 0;
+  };
 
   export type Node = {
     id: string;
@@ -62,8 +72,13 @@ export namespace Network {
     id: string;
     from_id: string;
     to_id: string;
-    title: string;
   };
+
+  export type LinkAppearance = {
+    id: string;
+    title: string;
+    arrow: Arrow.ArrowData;
+  }
   
   export type NodeMap = {
     [id: string]: Node;
@@ -73,6 +88,10 @@ export namespace Network {
     [from: string]: {
       [to: string]: Link
     }
+  };
+
+  export type LinkAppearanceMap = {
+    [id: string]: LinkAppearance;
   };
 
   export type NodeStatus = {
@@ -102,6 +121,7 @@ export namespace Network {
       type: "UD",
       nodes: [],
       links: {},
+      link_appearance: {},
       created_at: 0,
       updated_at: 0,
       ver: version,
@@ -168,7 +188,7 @@ export namespace Network {
     const net_attr = typeAttr[net.type];
     const forward: Reachability = { reachable_node: {}, reachable_link: {}, adjacent_node: {},  adjacent_link: {}, };
 
-    function survey(r: Reachability) {
+    function survey(r: Reachability, linkmap: LinkMap) {
       // BFSの開始ノード
       let deps: { [key: string]: Node } = { [origin_node.id]: origin_node };
       const n = Object.keys(node_map).length;
@@ -179,24 +199,23 @@ export namespace Network {
           // console.log(dir, fid, !!d2[fid])
           // すでに次に訪問する予定になっているノードは除外する
           if (d2[fid]) { continue; }
-          if (r.reachable_node[fid]) { continue; }
-          const linkmaps = net.type === "UD" ? [link_map, reverse_link_map] : [link_map];
-          for (const lm of linkmaps) {
-            const submap = lm[fid];
-            if (!submap) { continue; }
-            for (const tid of Object.keys(submap)) {
-              const link = submap[tid];
-              const link_id = link.id;
-              if (distance === 1) {
-                r.adjacent_link[link_id] = link;
-                r.adjacent_node[tid] = distance;
-              }
-              r.reachable_link[link_id] = link;
-              if (r.reachable_node[tid]) { continue }
-              d2[tid] = node_map[tid];
-            };
+          const submap = linkmap[fid];
+          if (!submap) { continue; }
+          for (const tid of Object.keys(submap)) {
+            if (r.reachable_node[tid]) { continue; }
+            if (d2[tid]) { continue; }
+            const link = submap[tid];
+            const link_id = link.id;
+            if (distance === 1) {
+              r.adjacent_link[link_id] = link;
+              r.adjacent_node[tid] = distance;
+            }
+            r.reachable_link[link_id] = link;
+            if (r.reachable_node[tid]) { continue }
+            d2[tid] = node_map[tid];
           };
         };
+        // console.log(Object.keys(d2))
         deps = d2;
         _.each(deps, (node, id) => r.reachable_node[id] = distance);
         // console.log(dir, Object.keys(deps));
@@ -214,10 +233,9 @@ export namespace Network {
     if (net_attr.directed) {
       // 向き有りの場合
       const backward: Reachability = { reachable_node: {}, reachable_link: {}, adjacent_node: {},  adjacent_link: {}, };
-      for (const r of [forward, backward]) { survey(r); }
-      return {
-        forward, backward,
-      };
+      survey(forward, link_map);
+      survey(backward, reverse_link_map);
+      return { forward, backward };
     } else {
       // 向き無しの場合
       const undirected_link_map: LinkMap = {};
@@ -229,8 +247,8 @@ export namespace Network {
           });
         })
       });
-
-      survey(forward);
+      console.log(undirected_link_map);
+      survey(forward, undirected_link_map);
       return {
         forward, backward: forward,
       };

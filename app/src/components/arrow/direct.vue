@@ -1,7 +1,7 @@
 <template lang="pug">
 g.direct-arrow(v-if="status && showable && g_bind" v-bind="g_bind")
   line.shaft(v-bind="shaft_bind")
-  polyline.head(v-bind="arrowhead_bind")
+  polyline.head(v-if="!status.headless" v-bind="arrowhead_bind")
   text(v-if="text_attr" v-bind="text_attr.bind") {{ text_attr.text }}
   g.out
     rect(

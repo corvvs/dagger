@@ -1,8 +1,7 @@
 <template lang="pug">
 g.direct-arrow(v-if="status && showable && g_bind" v-bind="g_bind")
   polyline.shaft(v-bind="shaft_bind")
-  line.head(v-bind="arrowhead_bind.u")
-  line.head(v-bind="arrowhead_bind.d")
+  polyline.head(v-if="!status.headless" v-bind="arrowhead_bind")
   text(v-if="text_attr" v-bind="text_attr.bind") {{ text_attr.text }}
   g.out
     polyline(
@@ -212,18 +211,13 @@ export default defineComponent({
         const xc = dx * Math.cos(head_angle); const ys = dy * Math.sin(head_angle);
         const xs = dx * Math.sin(head_angle); const yc = dy * Math.cos(head_angle);
         return {
-          u: {
-            x1: 0, y1: 0,
-            x2: xc - ys, y2: xs + yc,
-            ...Arrow.svg_attr_binder(status),
-            transform: `translate(${t.x},${t.y}) rotate(${arrow_angle_degree + 180})`,
-          },
-          d: {
-            x1: 0, y1: 0,
-            x2: xc + ys, y2: -xs + yc,
-            ...Arrow.svg_attr_binder(status),
-            transform: `translate(${t.x},${t.y}) rotate(${arrow_angle_degree + 180})`,
-          },
+          points: [
+            [xc + ys, -xs + yc],
+            [0, 0],
+            [xc - ys, xs + yc],
+          ].map(xy => `${xy[0]},${xy[1]}`).join(" "),
+          fill: "none",
+          ...Arrow.svg_attr_binder(status),
         };
       }),
 

@@ -24,7 +24,7 @@ exports.datahooks = {
   },
   net: {
     ...FU.synchronizer(db, `user/{user_id}/net/{id}`, `user/{user_id}/net_head/{id}`, {
-      write: change => _.omit(change.after.data(), "nodes", "links"),
+      write: change => _.omit(change.after.data(), "nodes", "links", "links_appearance"),
       delete: true,
     }),
   }
