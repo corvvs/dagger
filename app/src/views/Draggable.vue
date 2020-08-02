@@ -182,6 +182,7 @@ import SvgGrabNode from "@/components/SvgGrabNode.vue";
 import SvgArrow from "@/components/SvgArrow.vue";
 import anime from 'animejs'
 import * as Auth from "@/models/auth";
+import * as G from "@/models/geo";
 
 type Entity = {
   type: "Node" | "Link";
@@ -216,10 +217,22 @@ export default class Draggable extends Vue {
   @Prop() auth_state!: Auth.AuthState
   @Prop() dag_id!: string;
 
+  dag: D.GrabDAG | null = null
+  title: string = "";
+  nodes: D.GrabNode[] = [];
+  link_map: D.LinkMap = {};
+  link_dictionary: { [key: string]: D.GrabLink } = {}
+
   @Watch("auth_state.user")
   @Watch("dag_id")
   async fetch() {
     console.log(this.auth_state.user);
+    this.action_state = "select_field";
+    this.select_entity(true)
+    this.resizing_mode_horizontal = null
+    this.resizing_mode_vertical = null
+    this.offset.inner = null;
+
     this.dag = null;
     this.nodes = [];
     this.title = "";
@@ -254,14 +267,6 @@ export default class Draggable extends Vue {
     this.fetch()
   }
 
-
-
-  dag: D.GrabDAG | null = null
-  title: string = "";
-  nodes: D.GrabNode[] = [];
-  link_map: D.LinkMap = {};
-  link_dictionary: { [key: string]: D.GrabLink } = {}
-
   get node_map() {
     return _.keyBy(this.nodes, node => node.id)
   }
@@ -281,7 +286,7 @@ export default class Draggable extends Vue {
       resizing: selected && this.action_state === "resize_node",
       reachable_from_selected: !!(this.reachable_map && this.reachable_map.from_selected[node.id]),
       reachable_to_selected: !!(this.reachable_map && this.reachable_map.to_selected[node.id]),
-      neighboring_with_selected: !!(this.reachable_map && this.reachable_map.to_neighboring_link[node.id]),
+      adjacent_with_selected: !!(this.reachable_map && this.reachable_map.to_adjacent_link[node.id]),
       linkable_from_selected,
       not_linkable_from_selected: linking && !this.linkable_from_selected(node),
       link_targeted: !!(!selected && linkable_from_selected && overred),
@@ -325,7 +330,6 @@ export default class Draggable extends Vue {
     return this.node_map[this.selected_entity.id] || null;
   }
 
-
   get selected_link() {
     if (!this.selected_entity) { return null; }
     return this.link_dictionary[this.selected_entity.id] || null;
@@ -348,11 +352,11 @@ export default class Draggable extends Vue {
       /**
        * selected_node から出ているリンク
        */
-      from_neighboring_link: from.neighboring_link,
+      from_adjacent_link: from.adjacent_link,
       /**
        * selected_node から到達可能なリンク
        */
-      from_connected_link: from.connected_link,
+      from_reachable_link: from.reachable_link,
       /**
        * selected_node に到達可能なノード
        */
@@ -360,11 +364,11 @@ export default class Draggable extends Vue {
       /**
        * selected_node に入っているリンク
        */
-      to_neighboring_link: to.neighboring_link,
+      to_adjacent_link: to.adjacent_link,
       /**
        * selected_node に到達可能なリンク
        */
-      to_connected_link: to.connected_link,
+      to_reachable_link: to.reachable_link,
     }
   }
 
@@ -431,13 +435,13 @@ export default class Draggable extends Vue {
     const node_to = this.node_map[anchor.to_id];
     if (!node_from || !node_to) { return {} }
 
-    const neighboring = !!(this.reachable_map && (this.reachable_map.from_neighboring_link[anchor.id] || this.reachable_map.to_neighboring_link[anchor.id]));
-    const connected = !!(this.reachable_map && (this.reachable_map.from_connected_link[anchor.id] || this.reachable_map.to_connected_link[anchor.id]));
-    // console.log(anchor.id, neighboring, connected)
+    const adjacent = !!(this.reachable_map && (this.reachable_map.from_adjacent_link[anchor.id] || this.reachable_map.to_adjacent_link[anchor.id]));
+    const connected = !!(this.reachable_map && (this.reachable_map.from_reachable_link[anchor.id] || this.reachable_map.to_reachable_link[anchor.id]));
+    // console.log(anchor.id, adjacent, connected)
     const stroke_attr = this.selected_node ? {
       stroke: "#111",
-      stroke_opacity: (neighboring ? "1" : connected ? "0.6" : "0.1"),
-      stroke_dasharray: !neighboring && connected ? "3 2" : "",
+      stroke_opacity: (adjacent ? "1" : connected ? "0.6" : "0.1"),
+      stroke_dasharray: !adjacent && connected ? "3 2" : "",
     } : {
       stroke: "#111",
       stroke_opacity: 0.5,
@@ -489,18 +493,18 @@ export default class Draggable extends Vue {
     /**
      * マウスカーソルの現在位置
      */
-    cursor: D.Point | null;
+    cursor: G.Point | null;
     /**
      * ノードの内部座標系におけるオフセット値
      * = ノードの原点から見たオフセット位置の座標
      * リサイズ・移動に使う
      */
-    inner: D.Point | null;
+    inner: G.Point | null;
     /**
      * フィールドのオフセット値
      * = SVG座標系の原点から見た「現在のビューポートの原点に対応する位置」の座標
      */
-    field: D.Point;
+    field: G.Point;
 
     snap: { x: number | null, y: number | null } | null;
   } = {
@@ -1095,6 +1099,8 @@ export default class Draggable extends Vue {
         //   - フィールドをクリック
         if (!entity && event_type == "mousedown") {
           change_state("select_field");
+          this.select_entity(true);
+          this.transition_state(event, event_type, entity, recursion + 1);
           return;
         }
         break;

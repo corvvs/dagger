@@ -8,6 +8,9 @@ v-app#app
       v-list-item(@click.stop="navState.mini = true; go('/ldag')")
         v-list-item-icon
           v-icon share
+      v-list-item(@click.stop="navState.mini = true; go('/net')")
+        v-list-item-icon
+          v-icon share
       v-list-item(@click.stop="navState.show_user = true")
         v-list-item-icon
           v-icon person

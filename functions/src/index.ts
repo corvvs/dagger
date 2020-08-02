@@ -17,7 +17,13 @@ db.settings({ timestampsInSnapshots: true })
 
 exports.datahooks = {
   dag: {
-    ...FU.synchronizer(db, `user/{user_id}/dag/{dag_id}`, `user/{user_id}/dag_head/{dag_id}`, {
+    ...FU.synchronizer(db, `user/{user_id}/dag/{dag_id}`, `user/{id}/dag_head/{id}`, {
+      write: change => _.omit(change.after.data(), "nodes", "links"),
+      delete: true,
+    }),
+  },
+  net: {
+    ...FU.synchronizer(db, `user/{user_id}/net/{id}`, `user/{user_id}/net_head/{id}`, {
       write: change => _.omit(change.after.data(), "nodes", "links"),
       delete: true,
     }),

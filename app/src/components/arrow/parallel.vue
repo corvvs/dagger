@@ -15,6 +15,7 @@ g.direct-arrow(v-if="status && showable && g_bind" v-bind="g_bind")
 
 <script lang="ts">
 import _ from "lodash";
+import * as G from "@/models/geo";
 import * as D from "@/models/draggable";
 import * as Arrow from "@/models/arrow";
 import { reactive, ref, Ref, SetupContext, defineComponent, onMounted, PropType, watch, computed } from '@vue/composition-api';
@@ -65,8 +66,8 @@ export default defineComponent({
         y: prop.to.y + prop.to.height / 2,
       };
 
-      const cp1 = D.collision_point({ from: c2, to: c1 }, prop.from);
-      const cp2 = D.collision_point({ from: c1, to: c2 }, prop.to);
+      const cp1 = G.collision_point({ from: c2, to: c1 }, prop.from);
+      const cp2 = G.collision_point({ from: c1, to: c2 }, prop.to);
       if (!cp1 || !cp2 || (cp1.x === cp2.x && cp1.y === cp2.y)) { return null }
       return { x1: cp1.x, y1: cp1.y, x2: cp2.x, y2: cp2.y, dir_from: cp1.dir, dir_to: cp2.dir };
     });
@@ -87,8 +88,8 @@ export default defineComponent({
         y: prop.to.y + prop.to.height / 2,
       };
 
-      const cp1 = D.collision_point({ from: c2, to: c1 }, prop.from);
-      const cp2 = D.collision_point({ from: c1, to: c2 }, prop.to);
+      const cp1 = G.collision_point({ from: c2, to: c1 }, prop.from);
+      const cp2 = G.collision_point({ from: c1, to: c2 }, prop.to);
       if (!cp1 || !cp2 || (cp1.x === cp2.x && cp1.y === cp2.y)) { return null }
 
       const x = cp2.x - cp1.x;

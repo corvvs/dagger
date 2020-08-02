@@ -4,6 +4,8 @@ import Koto from '../views/Koto.vue';
 import Draw from '../views/Draw.vue';
 import DraggableList from '../views/DraggableList.vue';
 import Draggable from '../views/Draggable.vue';
+import NetworkList from '../views/NetworkList.vue';
+import Network from '../views/Network.vue';
 Vue.use(VueRouter);
 
 const routes: RouteConfig[] = [
@@ -27,6 +29,17 @@ const routes: RouteConfig[] = [
     name: "Draggable",
     props: true,
     component: Draggable,
+  },
+  {
+    path: "/net",
+    name: "NetworkList",
+    component: NetworkList,
+  },
+  {
+    path: "/net/:id",
+    name: "Network",
+    props: true,
+    component: Network,
   },
 ];
 

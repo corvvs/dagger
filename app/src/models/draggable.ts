@@ -5,24 +5,9 @@ import * as Arrow from "@/models/arrow";
 import * as U from "@/util";
 import * as FB from "@/models/fb";
 import * as Auth from "@/models/auth";
+import * as G from "@/models/geo";
 
 const dag_version = "0.0.1";
-
-export type Point = {
-  x: number;
-  y: number;
-}
-
-type Vector = {
-  /**
-   * 始点
-   */
-  from: Point;
-  /**
-   * 終点
-   */
-  to: Point;
-};
 
 export type GrabNode = {
   id: string;
@@ -38,7 +23,7 @@ export type GrabNodeStatus = {
   selected: boolean;
   overred: boolean;
   resizing: boolean;
-  neighboring_with_selected: boolean;
+  adjacent_with_selected: boolean;
   reachable_from_selected: boolean;
   reachable_to_selected: boolean;
   linkable_from_selected: boolean;
@@ -59,7 +44,7 @@ export type GrabLink = {
 };
 
 export type GrabArrow = {
-  vector: Vector;
+  vector: G.Vector;
   length?: number;
   angle?: number;
 };
@@ -83,7 +68,7 @@ export type GrabDAG = {
   created_at: number;
   updated_at: number;
   ver: string;
-  field_offset?: Point;
+  field_offset?: G.Point;
 };
 
 export type GrabDAGHead = Omit<GrabDAG, "nodes" | "links">;
@@ -93,94 +78,7 @@ export function spawn_lister(user: Auth.User) {
   return new FB.ObjectLister<GrabDAGHead>(firestore().collection(`user/${user.uid}/dag_head`));
 }
 
-
-export type ResizeMode = "n" | "w" | "s" | "e"
-  | "nw" | "sw" | "se" | "ne";
-
 export type ActionState = "select_field" | "move_field" | "select_node" | "select_link" | "move_node" | "resize_node" | "link_from";
-
-/**
- * 点(px, py) を通り、その点から (vx, vy) の方位に延びる直線(向きあり)
- */
-type LineParameter = {
-  px: number;
-  py: number;
-  vx: number;
-  vy: number;
-}
-// 情報量は Vector と同じだが、ニュアンスが異なるので Vector とは別の型にしておく
-
-/**
- * 2つの直線の交点を求める
- * 交点がない場合は null を返す
- * 
- */
-function crossing_point(v: LineParameter, w: LineParameter) {
-  // - 上記以外 -> 1点で交わる
-
-  const cross = v.vx * w.vy - v.vy * w.vx;
-  if (cross === 0) {
-    // - v, w が平行
-    const u = {
-      px: w.px - v.px,
-      py: w.py - v.py,
-      vx: w.vx - v.px,
-      vy: w.vy - v.py,
-    };
-    const u_cross = u.px * u.vy - u.py * u.vx;
-    if (u_cross === 0) {
-      // - v, w が平行かつ重なっている -> 全ての点で交わる
-      return null;
-    } else {
-      // - v, w が平行かつ重なっていない -> 交わらない
-      return null;
-    }
-  }
-
-  // s = ( (v0.x - w0.x) * w1.y - (v0.y - w0.y) * w1.x) ) / (v1.x * w1.y - v1.y * w1.x)
-  const sd = (v.py - w.py) * w.vx - (v.px - w.px) * w.vy;
-  const sn = cross;
-  const s = sd / sn;
-  return _.isFinite(s) ? {
-    x: v.px + v.vx * s,
-    y: v.py + v.vy * s,
-    s,
-  } : null;
-}
-
-/**
- * ベクトル *vector* が定義する線分と *node*の張る矩形領域との交点のうち、ベクトル *vector* の根元に近いものを探す
- */
-export function collision_point(vector: Vector, node: GrabNode) {
-  const dx = (vector.to.x - vector.from.x);
-  const dy = (vector.to.y - vector.from.y);
-
-  const lines: (LineParameter & { dir: "n" | "w" | "s" | "e" })[] = [
-    { dir: "n", px: node.x, py: node.y, vx: 1, vy: 0 },
-    { dir: "w", px: node.x, py: node.y, vx: 0, vy: 1 },
-    { dir: "s", px: node.x + node.width, py: node.y + node.height, vx: 1, vy: 0 },
-    { dir: "e", px: node.x + node.width, py: node.y + node.height, vx: 0, vy: 1 },
-  ];
-
-  const epsilon = 0.001;
-  const edge_lines = _(lines).map(w => {
-    const result = crossing_point({
-      px: vector.from.x, py: vector.from.y, vx: dx, vy: dy,
-    }, w);
-    if (!result) { return result; }
-    return { ...result, dir: w.dir };
-  }).compact().filter(crossing => {
-    return -epsilon <= crossing.s && crossing.s <= 1 + epsilon // crossing は vectorが乗っている直線に乗っているが、それが線分 vector 上にあるかどうか
-        && (crossing.x - node.x >= -epsilon) // crossing が矩形 node の境界線上にあるかどうか
-        && (crossing.y - node.y >= -epsilon)
-        && (node.x + node.width - crossing.x >= -epsilon)
-        && (node.y + node.height - crossing.y >= -epsilon)
-  }).sortBy(crossing => {
-    return Math.pow(crossing.x - vector.from.x, 2) + Math.pow(crossing.y - vector.from.y, 2)
-  }).value();
-  if (edge_lines.length === 0) { return null; }
-  return _.pick(edge_lines[0], "x", "y", "dir");
-}
 
 export function new_dag(id?: string): GrabDAG {
   return {
@@ -302,9 +200,9 @@ export function align_by_d3_dag(sorted_nodes: GrabNode[], link_map: LinkMap, rev
 
 export function survey_reachablility(origin_node: GrabNode, node_map: NodeMap, link_map: LinkMap) {
   const reachable_node: { [key: string]: number } = {};
-  const neighboring_node: { [key: string]: GrabNode } = {};
-  const neighboring_link: { [key: string]: GrabLink } = {};
-  const connected_link: { [key: string]: GrabLink } = {};
+  const adjacent_node: { [key: string]: GrabNode } = {};
+  const adjacent_link: { [key: string]: GrabLink } = {};
+  const reachable_link: { [key: string]: GrabLink } = {};
   let deps: { [key: string]: GrabNode } = { [origin_node.id]: origin_node };
   let distance = 0;
   while (Object.keys(deps).length > 0) {
@@ -319,10 +217,10 @@ export function survey_reachablility(origin_node: GrabNode, node_map: NodeMap, l
           const link = submap[tid];
           const link_id = link.id;
           if (distance === 1) {
-            neighboring_link[link_id] = link;
-            neighboring_node[tid] = node_map[tid];
+            adjacent_link[link_id] = link;
+            adjacent_node[tid] = node_map[tid];
           }
-          connected_link[link_id] = link;
+          reachable_link[link_id] = link;
           if (reachable_node[tid]) { continue }
           d2[tid] = node_map[tid];
         };
@@ -332,12 +230,12 @@ export function survey_reachablility(origin_node: GrabNode, node_map: NodeMap, l
     _.each(deps, (node, id) => reachable_node[id] = distance);
     // console.log(dir, Object.keys(deps));
   }
-  // console.log(neighboring_link, connected_link)
+  // console.log(adjacent_link, reachable_link)
   return {
     reachable_node,
-    neighboring_node,
-    neighboring_link,
-    connected_link,
+    adjacent_node,
+    adjacent_link,
+    reachable_link,
   };
 }
 
@@ -381,7 +279,7 @@ export function linkable(from: GrabNode, to: GrabNode, link_map: LinkMap) {
 }
 
 export function snap_to(
-  t: Point,
+  t: G.Point,
   node: GrabNode,
   x_sorted_nodes: { t: number, node: GrabNode }[],
   y_sorted_nodes: { t: number, node: GrabNode }[]

@@ -1,8 +1,7 @@
 <template lang="pug">
 g.direct-arrow(v-if="status && showable && g_bind" v-bind="g_bind")
   line.shaft(v-bind="shaft_bind")
-  line.head(v-bind="arrowhead_bind.u")
-  line.head(v-bind="arrowhead_bind.d")
+  polyline.head(v-bind="arrowhead_bind")
   text(v-if="text_attr" v-bind="text_attr.bind") {{ text_attr.text }}
   g.out
     rect(
@@ -17,6 +16,7 @@ g.direct-arrow(v-if="status && showable && g_bind" v-bind="g_bind")
 import _ from "lodash";
 import * as D from "@/models/draggable";
 import * as Arrow from "@/models/arrow";
+import * as G from "@/models/geo";
 import { reactive, ref, Ref, SetupContext, defineComponent, onMounted, PropType, watch, computed } from '@vue/composition-api';
 
 type CustomArrow = Arrow.DirectArrow;
@@ -65,8 +65,8 @@ export default defineComponent({
         y: prop.to.y + prop.to.height / 2,
       };
 
-      const cp1 = D.collision_point({ from: c2, to: c1 }, prop.from);
-      const cp2 = D.collision_point({ from: c1, to: c2 }, prop.to);
+      const cp1 = G.collision_point({ from: c2, to: c1 }, prop.from);
+      const cp2 = G.collision_point({ from: c1, to: c2 }, prop.to);
       if (!cp1 || !cp2 || (cp1.x === cp2.x && cp1.y === cp2.y)) { return null }
       return { x1: cp1.x, y1: cp1.y, x2: cp2.x, y2: cp2.y };
     });
@@ -139,16 +139,13 @@ export default defineComponent({
         const xs = dx * Math.sin(angle); const yc = dy * Math.cos(angle);
         const head_x = r * (1 - arrow_head.arrow_headposition.value);
         return {
-          u: {
-            x1: head_x, y1: 0,
-            x2: head_x + xc - ys, y2: xs + yc,
-            ...Arrow.svg_attr_binder(status),
-          },
-          d: {
-            x1: head_x, y1: 0,
-            x2: head_x + xc + ys, y2: -xs + yc,
-            ...Arrow.svg_attr_binder(status),
-          },
+          points: [
+            [head_x + xc + ys, -xs + yc],
+            [head_x, 0],
+            [head_x + xc - ys, xs + yc],
+          ].map(xy => `${xy[0]},${xy[1]}`).join(" "),
+          fill: "none",
+          ...Arrow.svg_attr_binder(status),
         };
       }),
 

@@ -1,23 +1,23 @@
 <template lang="pug">
 #factor
   .panel
-    v-btn(@click="edit_new_koto") new Koto
+    v-btn(@click="edit_new_item") new Koto
   .kotolist
     .kotoschema
       .time 作成
       .short_text タイトル
       .id ID
-    .kotoitem(v-for="koto in docs" :key="koto.id" @click="view_koto(koto)")
-      .time {{ timeout(koto.created_at, "YY/MM/DD hh:mm:ss") }}
+    .kotoitem(v-for="koto in lister.items" :key="koto.id" @click="view_item(koto)")
+      .time {{ format_epoch(koto.created_at, "YY/MM/DD hh:mm:ss") }}
       .short_text(:title="koto.title") {{ koto.title }}
       .id {{ koto.id }}
 
 
 
-  v-dialog(v-model="show_new_koto" max-width=800)
+  v-dialog(v-model="show_new_item" max-width=800)
     v-card.koto
       v-card-title 
-        h3 {{ newKoto.title  || '新しいKoto' }}
+        h3 {{ newItem.title  || '新しいKoto' }}
         v-btn(large icon @click="new_mode = 'view'" :color="new_mode === 'view' ? 'orange' : ''")
           v-icon visibility
         v-btn(large icon @click="new_mode = 'edit'" :color="new_mode === 'edit' ? 'blue' : ''")
@@ -26,25 +26,25 @@
 
       template(v-if="new_mode == 'view'")
         v-card-text(style="text-align:left;")
-          .kotopreview(v-html="newKotoHTML")
+          .kotopreview(v-html="newItemHTML")
       template(v-if="new_mode == 'edit'")
         v-card-text(style="text-align:left;")
-          v-text-field(v-model="newKoto.title" type="text" label="タイトル" :error-messages="newKotoError ? newKotoError.title : ''")
-          v-textarea(v-model="newKoto.body" label="内容" outlined)
+          v-text-field(v-model="newItem.title" type="text" label="タイトル" :error-messages="newItemError ? newItemError.title : ''")
+          v-textarea(v-model="newItem.body" label="内容" outlined)
 
       v-card-text 
-        h5 ID: {{ newKoto.id }}
+        h5 ID: {{ newItem.id }}
       v-card-actions
-        v-btn(@click="show_new_koto = false") 閉じる
-        v-btn(@click="post_koto(newKoto)" :disabled="!!newKotoError" :loading="koto_working") 保存
+        v-btn(@click="show_new_item = false") 閉じる
+        v-btn(@click="post_koto(newItem)" :disabled="!!newItemError" :loading="koto_working") 保存
 
 
 
-  v-dialog(v-model="show_existing_koto" max-width=800)
-    v-card.koto(v-if="selectedKoto")
+  v-dialog(v-model="show_existing_item" max-width=800)
+    v-card.koto(v-if="selectedItem")
 
       v-card-title 
-        h3 {{ selectedKoto.title  || '（タイトルなし）' }}
+        h3 {{ selectedItem.title  || '（タイトルなし）' }}
         v-btn(large icon @click="existing_mode = 'view'" :color="existing_mode === 'view' ? 'orange' : ''")
           v-icon visibility
         v-btn(large icon @click="existing_mode = 'edit'" :color="existing_mode === 'edit' ? 'blue' : ''")
@@ -53,20 +53,20 @@
 
       template(v-if="existing_mode == 'view'")
         v-card-text(style="text-align:left;")
-          .kotopreview(v-html="selectedKotoHTML")
+          .kotopreview(v-html="selectedItemHTML")
       template(v-if="existing_mode == 'edit'")
         v-card-text(style="text-align:left;")
-          v-text-field(v-model="selectedKoto.title" type="text" label="タイトル" :error-messages="selectedKotoError ? selectedKotoError.title : ''")
-          v-textarea(v-model="selectedKoto.body" label="内容" outlined)
+          v-text-field(v-model="selectedItem.title" type="text" label="タイトル" :error-messages="selectedItemError ? selectedItemError.title : ''")
+          v-textarea(v-model="selectedItem.body" label="内容" outlined)
 
       v-card-text 
-        h5 ID: {{ selectedKoto.id }}
+        h5 ID: {{ selectedItem.id }}
       v-card-actions
-        v-btn(@click="show_existing_koto = false") 閉じる
-        v-btn(v-if="existing_mode == 'view'" @click="delete_koto(selectedKoto)" :disabled="false" :loading="koto_working" color="red white--text")
+        v-btn(@click="show_existing_item = false") 閉じる
+        v-btn(v-if="existing_mode == 'view'" @click="delete_koto(selectedItem)" :disabled="false" :loading="koto_working" color="red white--text")
           v-icon delete
           | 削除
-        v-btn(v-if="existing_mode == 'edit'" @click="patch_koto(selectedKoto)" :disabled="!!selectedKotoError" :loading="koto_working")
+        v-btn(v-if="existing_mode == 'edit'" @click="patch_koto(selectedItem)" :disabled="!!selectedItemError" :loading="koto_working")
           v-icon cloud_upload
           | 保存
 
@@ -77,136 +77,134 @@ import * as _ from "lodash";
 import moment from "moment";
 import { Prop, Component, Vue } from 'vue-property-decorator';
 import firebase from "firebase";
-import * as F from "@/models/koto"
+import { reactive, ref, Ref, SetupContext, defineComponent, onMounted, PropType, watch, computed } from '@vue/composition-api';
+import * as K from "@/models/koto"
 import { Marked, MarkedOptions } from 'marked-ts'
 import { extend, ValidationProvider, ValidationObserver } from 'vee-validate';
 import { required } from 'vee-validate/dist/rules';
 import * as Auth from "@/models/auth";
+import * as FB from "@/models/fb";
+import * as F from "@/formatter"
+import * as U from "@/util";
 extend('required', required);
 
-@Component({
+const useNewItem = () => {
+  const show_new_item = ref(false);
+  const newItem = ref(K.Koto.spawn());
+  const new_mode: Ref<"view" | "edit"> = ref("edit");
+  return  {
+    show_new_item,
+    newItem,
+    new_mode,
+
+    newItemHTML: computed(() => {
+      const option = new MarkedOptions()
+      option.gfm = true
+      // option.breaks = true,
+      return Marked.parse(newItem.value.body, option);
+    }),
+
+    newItemError: computed(() => {
+      return K.Koto.validate_update(newItem.value);
+    }),
+
+    edit_new_item() {
+      new_mode.value = "edit";
+      show_new_item.value = true;
+    },
+  };
+};
+
+const useEditItem = () => {
+  const show_existing_item = ref(false);
+  const existing_mode: Ref<"view" | "edit"> = ref("view");
+  const selectedItem: Ref<K.Koto | null> = ref(null);
+  return {
+    show_existing_item,
+    existing_mode,
+    selectedItem,
+
+    view_item(koto: K.Koto) {
+      selectedItem.value = K.Koto.copy(koto);
+      existing_mode.value = "view";
+      show_existing_item.value = true;
+    },
+
+    selectedItemHTML: computed(() => {
+      if (!selectedItem.value) { return "" }
+      const option = new MarkedOptions()
+      option.gfm = true
+      return Marked.parse(selectedItem.value.body, option);
+    }),
+
+    selectedItemError: computed(() => {
+      return K.Koto.validate_update(selectedItem.value ? selectedItem.value : undefined);
+    }),
+
+  };
+};
+
+export default defineComponent({
   components: {
     ValidationProvider, ValidationObserver,
-  }
-})
-export default class Koto extends Vue {
+  },
 
-  @Prop() auth_state!: Auth.AuthState
+  props: {
+    auth_state: {
+      type: Object as PropType<Auth.AuthState>,
+      required: true,
+    },
+  },
 
-  // -- util --
-  timeout(epoch_ms: number, format: string) {
-    return moment(epoch_ms).format(format);
-  }
+  setup(props: {
+    auth_state: Auth.AuthState;
+  }, context: SetupContext) {
 
-  // -- new Koto --
-  show_new_koto = false;
-  newKoto: F.Koto = F.Koto.spawn();
-  new_mode: "view" | "edit" = "edit";
-  edit_new_koto() {
-    this.new_mode = "edit";
-    this.show_new_koto = true;
-  }
-
-  get newKotoHTML(): string {
-    const option = new MarkedOptions()
-    option.gfm = true
-    // option.breaks = true
-    return Marked.parse(this.newKoto.body, option);
-  }
-
-  get newKotoError() {
-    return F.Koto.validate_update(this.newKoto);
-  }
-
-
-  async post_koto(object: F.Koto) {
-    if (!object) { return; }
-    await this.lister.save(object);
-    this.show_new_koto = false;
-    this.newKoto = F.Koto.spawn();
-  }
-
-  async patch_koto(object: F.Koto) {
-    if (!object) { return; }
-    await this.lister.save(object);
-    this.show_existing_koto = false;
-    this.existing_mode = "view";
-  }
-
-  async delete_koto(object: F.Koto) {
-    if (!object) { return; }
-    if (!confirm("削除します。よろしいですか？")){ return; }
-    await this.lister.delete(object);
-    this.show_existing_koto = false;
-    this.existing_mode = "view";
-  }
-
-  // -- existing Koto --
-  show_existing_koto = false;
-  existing_mode: "view" | "edit" = "view";
-  selectedKoto: F.Koto | null = null;
-  view_koto(koto: F.Koto) {
-    this.selectedKoto = F.Koto.copy(koto);
-    this.existing_mode = "view";
-    this.show_existing_koto = true;
-  }
-
-  get selectedKotoHTML(): string {
-    if (!this.selectedKoto) { return "" }
-    const option = new MarkedOptions()
-    option.gfm = true
-    // option.breaks = true
-    return Marked.parse(this.selectedKoto.body, option);
-  }
-
-  get selectedKotoError() {
-    return F.Koto.validate_update(this.selectedKoto ? this.selectedKoto : undefined);
-  }
-
-  // -- Kotos IO --
-  lister!: F.KotoLister;
-  unsubscriber!: () => void;
-  docs: F.Koto[] = [];
-  koto_working = false;
-
-  // -- LifeCycle Hooks --
-  async mounted() {
-
-    // -- lister --
-    // setup
-    this.lister = F.Koto.lister("_testuser_");
-    this.lister.option.saveStatusCallback = (status) => this.koto_working = status === "working";
-    this.lister.option.snapshotCallback = (change) => {
-      const { doc, object } = change;
-      // console.log(`[!!] ${change.type} ${change.object.id}`)
-      switch (change.type) {
-      case "added":
-      case "modified":
-        (() => {
-          const i = this.docs.findIndex((d) => d.id === doc.id)
-          if (0 <= i) {
-            this.docs.splice(i, 1, object);
-          } else {
-            this.docs.splice(0, 0, object);
-          }
-        })()
-        break;
-      case "removed":
-        (() => {
-          const i = this.docs.findIndex((d) => d.id === doc.id);
-          if (0 <= i) {
-            this.docs.splice(i, 1);
-          }
-        })();
-        break;
+    const lister = FB.useObjectLister(context, user => K.Koto.lister(user.uid));
+    const unsubscriber: Ref<(() => void) | null> = ref(null);
+    const docs: Ref<K.Koto[]> = ref([]);
+    const koto_working = ref(false);
+    onMounted(() => {
+      if (props.auth_state.user) {
+        lister.changed_user(props.auth_state)
       }
-    };
+    });
+    watch(() => props.auth_state.user, () => lister.changed_user(props.auth_state))
+    
+    const useNew = useNewItem();
+    const useEdit = useEditItem();
+    return {
+      ...lister,
+      koto_working,
+      ...F.useFormatter(),
+      ...useNew,
+      ...useEdit,
 
-    // fetch
-    (await this.lister.fetch()).forEach((d) => this.docs.push(d));
-    this.unsubscriber = this.lister.snapshot();
-  }
-}
+      async post_koto(object: K.Koto) {
+        if (!lister.lister.lister || !object) { return; }
+        await lister.lister.lister.save(object);
+        useNew.show_new_item.value = false;
+        useNew.newItem.value = K.Koto.spawn();
+      },
+
+      async patch_koto(object: K.Koto) {
+        if (!lister.lister.lister || !object) { return; }
+        await lister.lister.lister.save(object);
+        useEdit.show_existing_item.value = false;
+        useEdit.existing_mode.value = "view";
+      },
+
+      async delete_koto(object: K.Koto) {
+        if (!lister.lister.lister || !object) { return; }
+        if (!confirm("削除します。よろしいですか？")){ return; }
+        await lister.lister.lister.delete(object);
+        useEdit.show_existing_item.value = false;
+        useEdit.existing_mode.value = "view";
+      },
+
+    };
+  },
+});
 </script>
 
 <style lang="stylus">
