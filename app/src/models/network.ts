@@ -6,6 +6,7 @@ import * as U from "@/util";
 import * as FB from "@/models/fb";
 import * as Auth from "@/models/auth";
 import * as G from "@/models/geo";
+import { SetupContext, onMounted, watch } from '@vue/composition-api';
 
 const version = "0.0.1";
 
@@ -68,6 +69,19 @@ export namespace Network {
     z: number;
   };
 
+  export function spawnNode(overwrite: Partial<Node> = {}) {
+    return {
+      id: `node_${U.u_shorten_uuid(uuid.v4()).substring(0, 8)}`,
+      title: "new node",
+      width: 80,
+      height: 40,
+      x: 100,
+      y: 100,
+      z: 1,
+      ...overwrite,
+    }
+  }
+  
   export type Link = {
     id: string;
     from_id: string;
@@ -110,11 +124,33 @@ export namespace Network {
   export type ActionState = "select_field" | "move_field" | "select_node" | "select_link" | "move_node" | "resize_node" | "link_from";
   export type Head = Pick<Network, "id" | "created_at" | "updated_at" | "title" | "ver">;
   export type HeadLister = FB.ObjectLister<Head>;
-  export function spawn_lister(user: Auth.User) {
-    return new FB.ObjectLister<Head>(firestore().collection(`user/${user.uid}/net_head`));
+  function spawn_lister(user: Auth.User) {
+    return new FB.ObjectLister<Head>(`user/${user.uid}/net_head`);
+  }
+  export function useObjectLister(props: {
+    auth_state: Auth.AuthState;
+  }, context: SetupContext) {
+    const f = FB.useObjectLister(context, user => spawn_lister(user));
+    onMounted(() => {
+      if (props.auth_state.user) {
+        f.changed_user(props.auth_state)
+      }
+    });
+    watch(() => props.auth_state.user, () => f.changed_user(props.auth_state))
+    return {
+      ...f,
+    }
   }
 
-  export function spawn(id?: string): Network {
+  export function useObjectEditor() {
+    return {
+      get,
+      spawn,
+      post,
+    }
+  }
+
+  function spawn(id?: string): Network {
     return {
       id: id || `net_${U.u_shorten_uuid(uuid.v4()).substring(0,8)}`,
       title: "",
@@ -129,7 +165,7 @@ export namespace Network {
     };
   }
   
-  export function post(user: Auth.User, net: Network) {
+  function post(user: Auth.User, net: Network) {
     const now = Date.now();
     net.created_at = net.created_at || now;
     net.updated_at = now;
@@ -142,7 +178,7 @@ export namespace Network {
     return firestore().collection(`user/${user.uid}/net`).doc(net.id).set(data);
   }
   
-  export async function get(user: Auth.User, id: string) {
+  async function get(user: Auth.User, id: string) {
     const doc = await firestore().collection(`user/${user.uid}/net`).doc(id).get();
     if (!doc.exists) { return null; }
     const r: any = doc.data();
@@ -198,6 +234,8 @@ export namespace Network {
         for (const fid of Object.keys(deps)) {
           // console.log(dir, fid, !!d2[fid])
           // すでに次に訪問する予定になっているノードは除外する
+          if (r.reachable_node[fid]) { continue; }
+          r.reachable_node[fid] = distance;
           if (d2[fid]) { continue; }
           const submap = linkmap[fid];
           if (!submap) { continue; }
@@ -217,7 +255,6 @@ export namespace Network {
         };
         // console.log(Object.keys(d2))
         deps = d2;
-        _.each(deps, (node, id) => r.reachable_node[id] = distance);
         // console.log(dir, Object.keys(deps));
       }
     }
@@ -247,7 +284,7 @@ export namespace Network {
           });
         })
       });
-      console.log(undirected_link_map);
+      // console.log(undirected_link_map);
       survey(forward, undirected_link_map);
       return {
         forward, backward: forward,
@@ -307,5 +344,162 @@ export namespace Network {
     // }
     return snap;
   }
-}
 
+  export function link_for(
+    selected_node: Node,
+    to: Node,
+  ) {
+    const from = selected_node;
+    const id = `${from.id}_${to.id}`;
+    const link: Link = {
+      id,
+      from_id: from.id,
+      to_id: to.id,
+    };
+    const appearance: LinkAppearance = {
+      id,
+      title: "",
+      arrow: {
+        ...link,
+        type: "direct",
+        head: {},
+        shaft: {},
+      },
+    }
+    return {
+      link,
+      appearance,
+    };
+  }
+
+  export function import_from_text(type: Type, text: string) {
+    const lines = _(text.split("\n")).map(t => t.replace(/^\s+/, "").replace(/\s+$/, "")).compact().value();
+    if (lines.length < 2) { return null; }
+    try {
+      const quantities = lines.shift()!.split(/\s+/);
+      const [N, M] = quantities.map(t => parseInt(t));
+      if (M !== lines.length) {
+        throw "Mとリンク数が合致しない";
+      }
+      const node_names: { [name: string]: Node } = {};
+      const link_map: LinkMap = {};
+      const reverse_link_map: LinkMap = {};
+      const link_appearance: LinkAppearanceMap = {};
+      lines.forEach(t => {
+        const [a, b] = t.split(/\s+/);
+        node_names[a] = node_names[a] || spawnNode({ title: a });
+        node_names[b] = node_names[b] || spawnNode({ title: b });
+        const from = node_names[a]; const to = node_names[b];
+        const result = link_for(from, to);
+        link_map[from.id] = link_map[from.id] || {};
+        link_map[from.id][to.id] = result.link;
+        reverse_link_map[to.id] = reverse_link_map[to.id] || {};
+        reverse_link_map[to.id][from.id] = result.link;
+        link_appearance[result.link.id] = result.appearance;
+      });
+      const nodes = _.values(node_names);
+      const undirected_link_map: LinkMap = {};
+      [link_map, reverse_link_map].forEach(lm => {
+        _.each(lm, (submap, fid) => {
+          undirected_link_map[fid] = undirected_link_map[fid] || {};
+          _.each(submap, (v, tid) => undirected_link_map[fid][tid] = v);
+        });
+      });
+
+      const attr = netAttr(type);
+      // console.log(attr, !attr.loop, !attr.cyclic, !!attr.forest);
+      if (!attr.loop && has_loop(link_map)) { throw "detected a loop"; }
+      if (!attr.cyclic && has_cycle(link_map)) { throw "detected a cycle"; }
+      if (!!attr.forest && has_multiple_path(attr.directed ? link_map : undirected_link_map)) { throw "detected mutiple path"; }
+
+      return {
+        nodes,
+        link_map,
+        link_appearance,
+      };
+    } catch(e) {
+      console.warn(e);
+      return null;
+    }
+  }
+
+  /**
+   * ループがあるかどうか調べる
+   * -> 全てのリンクについて、from,toを入れ替えたリンクを探す
+   */
+  function has_loop(link_map: LinkMap) {
+    return !!Object.keys(link_map).find(fid => !!link_map[fid][fid])
+  }
+
+  /**
+   * 閉路があるかどうか調べる
+   */
+  function has_cycle(link_map: LinkMap) {
+    const global_visited_node: { [id: string]: number } = {};
+    const global_visited_link: { [id: string]: true } = {};
+    const n = Object.keys(link_map).length;
+    const nodes = Object.keys(link_map);
+    const stack: string[] = [];
+    for (const root of nodes) {
+      if (global_visited_node[root]) { continue; }
+      console.log(root, global_visited_node);
+      stack.push(root); 
+      for (let i = 0; stack.length > 0 && i < 2 * n; ++i) {
+        const f = stack.pop()!; 
+        if (!link_map[f]) { continue };
+        for (const t of Object.keys(link_map[f])) {
+          const link = link_map[f][t];
+          console.log(t, link)
+          if (global_visited_link[link.id]) { continue; }
+          if (t === root) { return true }
+          if (global_visited_node[t]) { continue; }
+          global_visited_node[t] = (global_visited_node[t] || 0) + 1;
+          global_visited_link[link.id] = true;
+          stack.push(t);
+        }
+      }
+    }
+    console.log(global_visited_node);
+
+    return false;
+  }
+
+  /**
+   * 複数の経路を持つようなノードのペアが存在するかどうかを調べる
+   * -> 全てのノードからBFSを行い、複数回訪問されるノードがあるかどうかを調べる
+   */
+  function has_multiple_path(link_map: LinkMap) {
+    const global_visited_node: { [id: string]: true } = {};
+    const global_visited_link: { [id: string]: true } = {};
+    const n = Object.keys(link_map).length;
+    for (const fid of Object.keys(link_map)) {
+      if (global_visited_node[fid]) { continue; }
+      let deps: { [id: string]: true } = { [fid]: true };
+      for (let distance = 1; distance < n * 2; ++distance) {
+        if (Object.keys(deps).length === 0) { break; }
+        const d2: { [key: string]: true } = {};
+        for (const fid of Object.keys(deps)) {
+          // console.log(dir, fid, !!d2[fid])
+          // すでに次に訪問する予定になっているノードは除外する
+          if (global_visited_node[fid]) { continue; }
+          global_visited_node[fid] = true;
+          if (d2[fid]) { continue; }
+          const submap = link_map[fid];
+          if (!submap) { continue; }
+          for (const tid of Object.keys(submap)) {
+            const link = submap[tid];
+            if (global_visited_link[link.id]) { continue; }
+            if (d2[tid]) { return true; }
+            if (global_visited_node[tid]) { return true; }
+            const link_id = link.id;
+            global_visited_link[link_id] = true;
+            d2[tid] = true;
+          };
+        };
+        deps = d2;
+      }
+    };
+    return false;
+
+  }
+}

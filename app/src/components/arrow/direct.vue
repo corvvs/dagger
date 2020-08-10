@@ -14,7 +14,7 @@ g.direct-arrow(v-if="status && showable && g_bind" v-bind="g_bind")
 
 <script lang="ts">
 import _ from "lodash";
-import * as D from "@/models/draggable";
+import * as N from "@/models/network";
 import * as Arrow from "@/models/arrow";
 import * as G from "@/models/geo";
 import { reactive, ref, Ref, SetupContext, defineComponent, onMounted, PropType, watch, computed } from '@vue/composition-api';
@@ -25,10 +25,10 @@ type Status = Arrow.ArrowStatus<CustomArrow>;
 export default defineComponent({
   props: {
     from: {
-      type: Object as PropType<D.GrabNode>
+      type: Object as PropType<N.Network.Node>
     },
     to: {
-      type: Object as PropType<D.GrabNode>
+      type: Object as PropType<N.Network.Node>
     },
     arrow_id: {
       type: String
@@ -41,8 +41,8 @@ export default defineComponent({
   },
 
   setup(prop: {
-    from: D.GrabNode;
-    to: D.GrabNode;
+    from: N.Network.Node;
+    to: N.Network.Node;
     arrow_id?: string;
     status: Status;
     selected?: boolean;

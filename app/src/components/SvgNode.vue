@@ -34,7 +34,7 @@ g.node(
 import _ from "lodash";
 import { reactive, ref, Ref, SetupContext, defineComponent, onMounted, PropType, watch, computed } from '@vue/composition-api';
 import { Prop, Component, Vue } from 'vue-property-decorator';
-import * as D from "@/models/draggable";
+import * as N from "@/models/network";
 import * as F from "@/formatter"
 
 const edgeWidth = 5;
@@ -42,18 +42,18 @@ const edgeWidth = 5;
 export default defineComponent({
   props: {
     node: {
-      type: Object as PropType<D.GrabNode>,
+      type: Object as PropType<N.Network.Node>,
       required: true,
     },
     status: {
-      type: Object as PropType<D.GrabNodeStatus>,
+      type: Object as PropType<N.Network.NodeStatus>,
       required: true,
     },
   },
 
   setup(prop: {
-    node: D.GrabNode;
-    status: D.GrabNodeStatus;
+    node: N.Network.Node;
+    status: N.Network.NodeStatus;
   }, context: SetupContext) {
     return {
       ...F.useFormatter(),

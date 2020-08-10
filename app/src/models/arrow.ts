@@ -1,6 +1,4 @@
 import _ from "lodash";
-import * as G from "@/models/draggable";
-import * as U from "@/util";
 import { SetupContext, computed } from '@vue/composition-api';
 
 // [Arrow]

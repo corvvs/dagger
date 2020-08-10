@@ -8,7 +8,7 @@ component.arrow(
 
 <script lang="ts">
 import _ from "lodash";
-import * as D from "@/models/draggable";
+import * as N from "@/models/network";
 import * as Arrow from "@/models/arrow";
 import Direct from "@/components/arrow/direct.vue"
 import Parallel from "@/components/arrow/parallel.vue"
@@ -21,10 +21,10 @@ export default defineComponent({
 
   props: {
     from: {
-      type: Object as PropType<D.GrabNode>
+      type: Object as PropType<N.Network.Node>
     },
     to: {
-      type: Object as PropType<D.GrabNode>
+      type: Object as PropType<N.Network.Node>
     },
     arrow_id: {
       type: String

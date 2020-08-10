@@ -19,12 +19,10 @@
 
 <script lang="ts">
 import * as _ from "lodash";
-import moment from "moment";
 import { reactive, ref, Ref, SetupContext, defineComponent, onMounted, PropType, watch } from '@vue/composition-api';
 import * as N from "@/models/network"
 import * as Auth from "@/models/auth";
 import * as F from "@/formatter"
-import * as FB from "@/models/fb";
 
 export default defineComponent({
   props: {
@@ -37,21 +35,15 @@ export default defineComponent({
   setup(props: {
     auth_state: Auth.AuthState;
   }, context: SetupContext) {
-    const lister = FB.useObjectLister(context, user => N.Network.spawn_lister(user));
-    onMounted(() => {
-      if (props.auth_state.user) {
-        lister.changed_user(props.auth_state)
-      }
-    });
-    watch(() => props.auth_state.user, () => lister.changed_user(props.auth_state))
+    const editor = N.Network.useObjectEditor()
     return {
-      ...lister,
+      ...N.Network.useObjectLister(props, context),
       ...F.useFormatter(),
       view_item: (item: N.Network.Head) => {
         context.root.$router.push(`/net/${item.id}`)
       },
       new_item: () => {
-        const item = N.Network.spawn();
+        const item = editor.spawn();
         context.root.$router.push(`/net/${item.id}`)
       },
       typename: (t: any) => (N.Network.typeName as any)[t],

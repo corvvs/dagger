@@ -22,8 +22,9 @@ export class ObjectLister<T extends ObjectBase> {
     this._save_status = status;
     if (this.option.saveStatusCallback) { this.option.saveStatusCallback(this._save_status); }
   }
+  private collection: firebase.firestore.CollectionReference;
 
-  constructor(private collection: firebase.firestore.CollectionReference, public option: {
+  constructor(collectionPath: string, public option: {
     /**
      * snapshotの後処理コールバック
      */
@@ -43,6 +44,7 @@ export class ObjectLister<T extends ObjectBase> {
      */
     deserializer?: (doc: firebase.firestore.DocumentSnapshot) => Promise<T>,
   } = {}) {
+    this.collection = firestore().collection(collectionPath);
   }
 
   /**

@@ -1,5 +1,4 @@
 import * as _ from "lodash";
-import firebase, { firestore, auth } from "firebase";
 import * as uuid from "uuid";
 import * as U from "@/util";
 import * as FB from "@/models/fb";
@@ -42,12 +41,8 @@ export namespace Koto {
   }
 
   // -- Firebase I/O --
-  function koto_collection(uid: string) {
-    return firebase.firestore().collection(`user/${uid}/koto`);
-  }
-
   export function lister(uid: string)  {
-    return new FB.ObjectLister<Koto>(koto_collection(uid));
+    return new FB.ObjectLister<Koto>(`user/${uid}/koto`);
   }
 
   export function copy(object: Koto) {

@@ -45,7 +45,7 @@
               )
 
           g.nodes
-            SvgGrabNode(v-for="node in netdata.nodes" :key="node.id"
+            SvgNode(v-for="node in netdata.nodes" :key="node.id"
               :node="node"
               :status="secondary_data.node_status_map[node.id]"
               @nodeMouseDownBody="mouseDownNode"
@@ -61,7 +61,7 @@
         :style="{ left: `${selected_node.x - 5 + offset.field.x}px`, top: `${selected_node.y - 5 + offset.field.y}px` }"
       )
         v-btn(small icon tile
-          @click="start_linking(selected_node.id)"
+          @click="start_linking($event, selected_node.id)"
           :color="state.action === 'link_from' ? 'info' : 'grey'"
           dark
           title="ここからリンク"
@@ -69,16 +69,6 @@
           v-icon(
           dark
           ) link
-        v-btn(small icon tile
-          @click="flip_node_to('front', selected_node)"
-          title="最前面へ"
-        )
-          v-icon flip_to_front
-        v-btn(small icon tile
-          @click="flip_node_to('back', selected_node)"
-          title="最背面へ"
-        )
-          v-icon flip_to_back
         v-btn(small icon tile
           color="red"
           @click="delete_node(selected_node)"
@@ -122,6 +112,8 @@
         v-btn(x-small @click="state.lock_on = !state.lock_on" :color="state.lock_on ? 'blue info' : ''")
           v-icon(small) lock
           | Lock
+        v-btn(x-small @click="showImporterRef = true")
+          | Import
       //- v-slider(v-model="field_zoom_level" label="Field Zoom" :min="-4" :max="4" step="1" :messages="`${field_zoom_level}`")
       .subpanel
         v-text-field(v-model="netdata.title" label="Graph Title")
@@ -174,54 +166,62 @@
       .line
         .name Snap To
         .value {{ offset.snap || "(none)" }}
+  
+  TextImport(
+    :network_type="netdata.type" :show="showImporterRef"
+    @closeImporter="showImporterRef = false"
+    @parsedImporter="receiveImporter"
+  )
 </template>
 
 
 <script lang="ts">
 import _ from "lodash";
-import moment from "moment";
-import { Prop, Component, Vue, Watch } from 'vue-property-decorator';
-import firebase from "firebase";
-import * as uuid from "uuid";
+import { Vue } from 'vue-property-decorator';
 import * as U from "@/util";
 import * as N from "@/models/network";
-import SvgGrabNode from "@/components/SvgGrabNode.vue";
+import SvgNode from "@/components/SvgNode.vue";
 import SvgArrow from "@/components/SvgArrow.vue";
+import TextImport from "@/components/NetworkTextImport.vue";
 import anime from 'animejs'
 import * as Auth from "@/models/auth";
 import * as G from "@/models/geo";
 import { reactive, ref, Ref, SetupContext, defineComponent, onMounted, PropType, watch, computed } from '@vue/composition-api';
-import { prototype } from 'vue/types/umd';
+
+type Node = N.Network.Node;
+type Link = N.Network.Link;
+
+type NetData = {
+  title: string;
+  type: N.Network.Type;
+  nodes: Node[];
+  link_map: N.Network.LinkMap;
+  link_appearance: N.Network.LinkAppearanceMap;
+};
+
+
+function useImporter() {
+  const showImporterRef = ref(false);
+  return {
+    showImporterRef,
+  };
+}
 
 type Entity = {
   type: "Node" | "Link";
   id: string;
 };
 
-type Node = N.Network.Node;
-type Link = N.Network.Link;
 
 const nodeMinimum = {
   width: 30,
   height: 30,
 };
 
-function makeNode(overwrite: Partial<Node> = {}) {
-  return {
-    id: `node_${U.u_shorten_uuid(uuid.v4()).substring(0, 8)}`,
-    title: "new node",
-    width: 80,
-    height: 40,
-    x: 100,
-    y: 100,
-    z: 1,
-    ...overwrite,
-  }
-}
 
 export default defineComponent({
   components: {
-    SvgGrabNode, SvgArrow,
+    SvgNode, SvgArrow, TextImport,
   },
   props: {
     auth_state: {
@@ -240,6 +240,7 @@ export default defineComponent({
     id: string;
   }, context: SetupContext) {
     const svgRef = ref(null);
+    const editor = N.Network.useObjectEditor();
 
     const state: {
       action: N.Network.ActionState;
@@ -276,13 +277,7 @@ export default defineComponent({
     });
 
     const net: Ref<N.Network.Network | null> = ref(null);
-    const netdata: {
-      title: string;
-      type: N.Network.Type;
-      nodes: Node[];
-      link_map: N.Network.LinkMap;
-      link_appearance: N.Network.LinkAppearanceMap;
-    } = reactive({
+    const netdata: NetData = reactive({
       title: "",
       type: "UD",
       nodes: [],
@@ -374,11 +369,11 @@ export default defineComponent({
       secondary_data.link_dictionary = {};
       flush_graph();
       if (props.auth_state.user && props.id) {
-        const n = await N.Network.get(props.auth_state.user, props.id);
+        const n = await editor.get(props.auth_state.user, props.id);
         if (n) {
           net.value = n as any;
         } else {
-          net.value = N.Network.spawn(props.id);
+          net.value = editor.spawn(props.id);
         }
         netdata.title = net.value!.title;
         netdata.nodes = net.value!.nodes;
@@ -402,7 +397,7 @@ export default defineComponent({
 
     const add_new_node = (arg: any = {}) => {
       const n = netdata.nodes.length;
-      netdata.nodes.push(makeNode({
+      netdata.nodes.push(N.Network.spawnNode({
         ...arg,
         x: (n > 0 ? netdata.nodes[n-1].x : 0) + 10,
         y: (n > 0 ? netdata.nodes[n-1].y : 0) + 10,
@@ -450,63 +445,25 @@ export default defineComponent({
       );
     }
 
-    const start_linking = (node_id: string) => {
-      if (state.action === "link_from") {
-        state.action = "select_field";
-      } else {
-        // this.select_entity()
-        state.action = "link_from";
-        offset.cursor = null;
-      }
-    }
-
-    const flip_node_to = (to: "front" | "back", node: Node) => {
-      const N = netdata.nodes.length;
-      const i = netdata.nodes.findIndex(n => n.id === node.id);
-      if (i < 0) { return }
-      if (to === "back") {
-        if (0 < i) {
-          const [d] = netdata.nodes.splice(i, 1);
-          netdata.nodes.splice(0, 0, d);
-        }
-      } else {
-        if (i < N - 1) {
-          const [d] = netdata.nodes.splice(i, 1);
-          netdata.nodes.push(d);
-        }
-      }
+    const start_linking = (event: MouseEvent, node_id: string) => {
+      transition_state(event, "click_button_link", { id: node_id, type: "Node" })
     }
 
     const set_link_from_selected = (to: Node) => {
-      if (selected_node.value && reachable_map.value && N.Network.is_linkable_from_selected(netdata.type, reachable_map.value, selected_node.value, to)) {
-        const from = selected_node.value;
-        const submap = netdata.link_map[from.id]
-        if (!submap || !submap[to.id]) {
-          if (!submap) {
-            Vue.set(netdata.link_map, from.id , { });
-          }
-          const id = `${from.id}_${to.id}`;
-          const link: Link = {
-            id,
-            from_id: from.id,
-            to_id: to.id,
-          };
-          const appearance: N.Network.LinkAppearance = {
-            id,
-            title: "",
-            arrow: {
-              ...link,
-              type: "direct",
-              head: {},
-              shaft: {},
-            },
-          }
-          Vue.set(netdata.link_map[from.id], to.id, link);
-          Vue.set(netdata.link_appearance, id, appearance);
-          Vue.set(secondary_data.link_dictionary, id, link);
-          Vue.set(secondary_data.link_binds, id, link_bind(link));
-        }
+      if (!selected_node.value || !reachable_map.value) { return; }
+      if (!N.Network.is_linkable_from_selected(netdata.type, reachable_map.value, selected_node.value, to)) { return; }
+      const result = N.Network.link_for(selected_node.value, to)
+      if (!result) { return; }
+      const { link, appearance } = result;
+      const from_id = link.from_id;
+      const submap = netdata.link_map[from_id]
+      if (!netdata.link_map[from_id]) {
+        Vue.set(netdata.link_map, from_id , { });
       }
+      Vue.set(netdata.link_map[from_id], to.id, link);
+      Vue.set(netdata.link_appearance, link.id, appearance);
+      Vue.set(secondary_data.link_dictionary, link.id, link);
+      Vue.set(secondary_data.link_binds, link.id, link_bind(link));
       flush_graph()
     }
 
@@ -541,6 +498,10 @@ export default defineComponent({
           }
           case "resize_node": {
             offset.cursor = { x: event.clientX, y: event.clientY };
+            break;
+          }
+          case "link_from": {
+            offset.cursor = null;
             break;
           }
         }
@@ -613,7 +574,7 @@ export default defineComponent({
           // - `select_node` -> `link_from`
           //   - リンクボタンを押す
           if (event_type === "click_button_link" && entity) {
-            start_linking(entity.id);
+            change_state("link_from");
             return;
           }
 
@@ -689,7 +650,7 @@ export default defineComponent({
           // - `link_from` -> `select_node`
           //   - リンクボタンを押す
           if (event_type === "click_button_link" && entity) {
-            start_linking(entity.id);
+            change_state("select_field");
             return;
           }
           // - `link_from` -> `select_field`
@@ -901,7 +862,6 @@ export default defineComponent({
             node.x = lx;
             node.y = ly; 
           }
-          flip_node_to("front", node);
           update_links_about(node);
           break;
         }
@@ -1038,7 +998,7 @@ export default defineComponent({
       selected_node,
       selected_link,
       savable: computed(() => { return !!net.value && !!props.auth_state.user && state.working === "idling"; }),
-      reachable_map,
+      // reachable_map,
       changable_net_type: computed(() => N.Network.changable_type(netdata.link_map)),
 
       net_type_item: computed(() => (["UD", "F", "D", "DA"] as const).map(type => ({ value: type, text: N.Network.typeName[type] }))),
@@ -1047,11 +1007,26 @@ export default defineComponent({
       add_new_node,
       ...handlers,
       debouncedMouseMove: _.throttle(mm, 33),
+      receiveImporter: (arg: {
+        nodes: Node[];
+        link_map: N.Network.LinkMap;
+        link_appearance: N.Network.LinkAppearanceMap;
+      }) => {
+        console.log(arg);
+        netdata.nodes = arg.nodes;
+        netdata.link_map = arg.link_map;
+        netdata.link_appearance = arg.link_appearance;
+        const link_dictionary = _(arg.link_map).flatMap(submap => _.values(submap)).keyBy(link => link.id).value();
+        secondary_data.link_dictionary = link_dictionary;
+        secondary_data.link_binds = _.mapValues(link_dictionary, link => link_bind(link));
+        flush_graph();
+      },
       start_linking,
       update_link,
-      flip_node_to,
       delete_link,
       delete_node,
+
+      ...useImporter(),
 
       // I/O
       async save() {
@@ -1066,7 +1041,7 @@ export default defineComponent({
           net.value.link_appearance = netdata.link_appearance;
           net.value.title = netdata.title;
           net.value.field_offset = offset.field;
-          await N.Network.post(props.auth_state.user, net.value);
+          await editor.post(props.auth_state.user, net.value);
         } catch (e) {
           console.error(e);
         }
@@ -1137,13 +1112,14 @@ export default defineComponent({
   .node-panel, .link-panel
     position absolute
     word-break keep-all
+    background-color white
     white-space nowrap
-    opacity 0.75
+    opacity 1
     transform-origin: top center;
     transform scale(+1,-1)
+    border solid 1px #888
     .v-btn
       transform scale(+1,-1)
-      border solid 1px #888
       margin 1px
 
 .self
