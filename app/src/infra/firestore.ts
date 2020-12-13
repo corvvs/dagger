@@ -1,7 +1,5 @@
 import * as _ from "lodash";
 import firebase, { firestore } from "firebase";
-import * as uuid from "uuid";
-import * as U from "@/util";
 
 type ObjectBase = {
   id: string;
@@ -24,7 +22,7 @@ export class ObjectLister<T extends ObjectBase> {
   }
   private collection: firebase.firestore.CollectionReference;
 
-  constructor(collectionPath: string, public option: {
+  constructor(user: Auth.User, collection: string, public option: {
     /**
      * snapshotの後処理コールバック
      */
@@ -44,7 +42,7 @@ export class ObjectLister<T extends ObjectBase> {
      */
     deserializer?: (doc: firebase.firestore.DocumentSnapshot) => Promise<T>,
   } = {}) {
-    this.collection = firestore().collection(collectionPath);
+    this.collection = firestore().collection(`user/${user.uid}/${collection}`);
   }
 
   /**
@@ -69,10 +67,10 @@ export class ObjectLister<T extends ObjectBase> {
   /**
    * 削除
    */
-  async delete(object: T) {
+  async delete(object_id: string) {
     this.change_save_status("working");
     try {
-      const result = this.collection.doc(object.id).delete();
+      const result = this.collection.doc(object_id).delete();
       this.change_save_status("idling");
       return result;
     } catch (e) {
@@ -85,6 +83,14 @@ export class ObjectLister<T extends ObjectBase> {
     return (await this.collection.orderBy("created_at", "desc")
       .limit(limit)
       .get()).docs.map((d) => d.data() as T);
+  }
+
+  async get(id: string) {
+    const doc = await this.collection.doc(id).get();
+    if (!doc.exists) { return null; }
+    return {
+      id, ...doc.data(),
+    } as T;
   }
 
   /**
@@ -101,7 +107,7 @@ export class ObjectLister<T extends ObjectBase> {
   }
 }
 
-import { reactive, SetupContext } from '@vue/composition-api';
+import { ref, Ref, reactive, SetupContext, watch } from '@vue/composition-api';
 import * as Auth from "@/models/auth";
 
 export const useObjectLister = <ObjectType extends ObjectBase>(
@@ -118,8 +124,18 @@ export const useObjectLister = <ObjectType extends ObjectBase>(
     items: [],
   });
 
+  const listerStatusRef: Ref<ListerStatus | null> = ref(null);
+
+  watch(()=> lister.lister ? lister.lister.save_status : null, (newValue) => listerStatusRef.value = newValue);
+
   return {
     lister,
+    listerStatusRef,
+
+    delete_item: (object_id: string) => {
+      if (!lister.lister)  { return; }
+      return lister.lister.delete(object_id);
+    },
 
     changed_user: async (auth_state: Auth.AuthState) => {
       if (auth_state.user) {

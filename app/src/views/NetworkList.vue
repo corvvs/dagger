@@ -12,7 +12,10 @@
       .time {{ format_epoch(item.created_at, "YY/MM/DD hh:mm:ss") }}
       .short_text(:title="item.title") {{ item.title }}
       .id {{ item.id }}
-      .typename {{ typename(item.type) }}
+      .typename [{{ typename(item.type) }}]
+      .delete
+        v-btn(icon small :disabled="listerStatusRef !== 'idling'" @click.stop="delete_item(item.id)")
+          v-icon(small) delete
 
 
 </template>

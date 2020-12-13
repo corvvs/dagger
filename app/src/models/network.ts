@@ -3,7 +3,7 @@ import { firestore } from "firebase";
 import * as uuid from "uuid";
 import * as Arrow from "@/models/arrow";
 import * as U from "@/util";
-import * as FB from "@/models/fb";
+import * as FB from "@/infra/firestore";
 import * as Auth from "@/models/auth";
 import * as G from "@/models/geo";
 import { SetupContext, onMounted, watch } from '@vue/composition-api';
@@ -20,6 +20,14 @@ export namespace Network {
   
   export type Type = keyof typeof typeName;
 
+  export type NetData = {
+    title: string;
+    type: Type;
+    nodes: Node[];
+    link_map: LinkMap;
+    link_appearance: LinkAppearanceMap;
+  };
+  
 
   type TypeAttr = {
     loop?: true;
@@ -28,6 +36,43 @@ export namespace Network {
     forest?: true;
     cyclic?: true;
   };
+
+  export type Entity = {
+    type: "Node" | "Link";
+    id: string;
+  };
+
+  export type InternalState = {
+    action: ActionState;
+    resizing_horizontal: "w" | "e" | null;
+    resizing_vertical: "n" | "s" | null;
+    snap_on: boolean;
+    lock_on: boolean;
+    selected_entity: Entity | null;
+    over_entity: Entity | null;
+    working: "saving" | "loading" | "idling";
+    animating: boolean;
+  };
+
+  export type OffsetGroup =  {
+    /**
+     * マウスカーソルの現在位置
+     */
+    cursor: G.Point | null;
+    /**
+     * ノードの内部座標系におけるオフセット値
+     * = ノードの原点から見たオフセット位置の座標
+     * リサイズ・移動に使う
+     */
+    inner: G.Point | null;
+    /**
+     * フィールドのオフセット値
+     * = SVG座標系の原点から見た「現在のビューポートの原点に対応する位置」の座標
+     */
+    field: G.Point;
+
+    snap: { x: number | null, y: number | null } | null;
+  }
 
   const typeAttr: Readonly<{ [key in Type]: TypeAttr }> = {
     F: { forest: true, },
@@ -67,6 +112,14 @@ export namespace Network {
     x: number;
     y: number;
     z: number;
+  };
+
+  export type NodeAppearance = {
+    text_align: "left" | "center" | "right";
+  };
+
+  const defaultNodeAppearance: NodeAppearance = {
+    text_align: "left",
   };
 
   export function spawnNode(overwrite: Partial<Node> = {}) {
@@ -125,7 +178,7 @@ export namespace Network {
   export type Head = Pick<Network, "id" | "created_at" | "updated_at" | "title" | "ver">;
   export type HeadLister = FB.ObjectLister<Head>;
   function spawn_lister(user: Auth.User) {
-    return new FB.ObjectLister<Head>(`user/${user.uid}/net_head`);
+    return new FB.ObjectLister<Head>(user, "net_head");
   }
   export function useObjectLister(props: {
     auth_state: Auth.AuthState;
@@ -165,23 +218,9 @@ export namespace Network {
     };
   }
   
-  function post(user: Auth.User, net: Network) {
-    const now = Date.now();
-    net.created_at = net.created_at || now;
-    net.updated_at = now;
-    const data: any = _.cloneDeep(net);
-    _.each(data.links, sublinks => {
-      _.each(sublinks, (link, id) => {
-        ["head", "shaft", "arrow"].forEach(key => link[key] = _.omit(link[key], "id", "from_id", "to_id"));
-      });
-    });
-    return firestore().collection(`user/${user.uid}/net`).doc(net.id).set(data);
-  }
-  
   async function get(user: Auth.User, id: string) {
-    const doc = await firestore().collection(`user/${user.uid}/net`).doc(id).get();
-    if (!doc.exists) { return null; }
-    const r: any = doc.data();
+    const r: any = (new FB.ObjectLister(user, "net")).get(id);
+    if (!r) { return null; }
     _.each(r.links, (sublinks) => {
       _.each(sublinks, link => {
         link.id = `${link.from_id}_${link.to_id}`;
@@ -198,6 +237,18 @@ export namespace Network {
     return r;
   }
 
+  function post(user: Auth.User, net: Network) {
+    const data: any = _.cloneDeep(net);
+    _.each(data.links, sublinks => {
+      _.each(sublinks, (link, id) => {
+        ["head", "shaft", "arrow"].forEach(key => 
+          link[key] = _.omit(link[key], "id", "from_id", "to_id")
+        );
+      });
+    });
+    return (new FB.ObjectLister(user, "net")).save(data);
+  }
+  
   type Reachability = {
     /**
      * 到達可能ノード

@@ -20,7 +20,7 @@ type APIFunc = (req: functions.https.Request, res: functions.Response, param: AP
 /**
  * @description CFをcors付きで定義する
  */
-export function FuncDef(func: APIFunc, runtimeOption: functions.RuntimeOptions = {}) { return functions.runWith(runtimeOption).https.onRequest((req, res) => cors(req, res, async () => {
+export function FuncDef(func: APIFunc, runtimeOption: functions.RuntimeOptions = {}) { return functions.region("asia-northeast1").runWith(runtimeOption).https.onRequest((req, res) => cors(req, res, async () => {
   const task_id = req.header("x-aurea-task_id");
   const function_execution_id = req.header("function-execution-id") || null;
   let task: FirebaseFirestore.DocumentSnapshot | null = null;
@@ -86,6 +86,9 @@ export function u_matchAll(str: string, regexp: RegExp) {
   return matches;
 }
 
+type HookHandler<T extends "onCreate" | "onUpdate" | "onWrite" | "onDelete"> = Parameters<(ReturnType<typeof functions.firestore.document>)[T]>[0]
+const functionBuilder = functions.region("asia-northeast1").firestore;
+
 /**
  * データ同期用のFirestoreフックをまとめて定義する
  * @param doc_path_from 
@@ -95,21 +98,83 @@ export function u_matchAll(str: string, regexp: RegExp) {
 export function synchronizer(
   db: FirebaseFirestore.Firestore,
   doc_path_from: string,
-  doc_path_to: string,
-  option: {
-    write?: boolean | ((data: functions.Change<functions.firestore.DocumentSnapshot>) => any);
-    create?: boolean | ((data: functions.firestore.QueryDocumentSnapshot) => any);
-    update?: boolean | ((data: functions.Change<functions.firestore.QueryDocumentSnapshot>) => any);
-    delete?: boolean;
-  } = {},
+  mapping: {
+    [doc_path_to: string]: {
+      write?: boolean | ((data: functions.Change<functions.firestore.DocumentSnapshot>) => any);
+      create?: boolean | ((data: functions.firestore.QueryDocumentSnapshot) => any);
+      update?: boolean | ((data: functions.Change<functions.firestore.QueryDocumentSnapshot>) => any);
+      delete?: boolean;
+    }
+  }
 ) {
 
-  const params_from = (U.u_matchAll(doc_path_from, /\{(\w+?)\}/)).map(m => m[1]).sort();
-  const params_to = (U.u_matchAll(doc_path_to, /\{(\w+?)\}/)).map(m => m[1]).sort();
-  console.log(params_from, params_to)
-  if (params_from.join(" ") !== params_to.join(" ")) {
-    throw new Error("path not matches");
+  const procs: {
+    write: HookHandler<"onWrite">[];
+    create: HookHandler<"onCreate">[];
+    update: HookHandler<"onUpdate">[];
+    delete: HookHandler<"onDelete">[];
+  } = {
+    write: [],
+    create: [],
+    update: [],
+    delete: [],
   }
+
+  const params_from = (U.u_matchAll(doc_path_from, /\{(\w+?)\}/)).map(m => m[1]).sort();
+  _.each(mapping, (option, doc_path_to) => {
+    const params_to = (U.u_matchAll(doc_path_to, /\{(\w+?)\}/)).map(m => m[1]).sort();
+    console.log(params_from, params_to)
+    if (params_from.join(" ") !== params_to.join(" ")) {
+      throw new Error("path not matches");
+    }
+
+    if (option.write && !option.create && !option.update) {
+      procs.write.push((document, context) => {
+        let path = doc_path_to;
+        _.each(context.params, (value, key) => {
+          path = path.replace(`{${key}}`, value);
+        });
+        console.log(doc_path_to, "->", path);
+        const data = typeof option.write === "function" ? option.write(document) : document.after.data()!;
+        if (!data) { return null; }
+        return db.doc(path).set(data);
+      });
+    }
+    if (!option.write && option.create) {
+      procs.create.push((document, context) => {
+        let path = doc_path_to;
+        _.each(context.params, (value, key) => {
+          path = path.replace(`{${key}}`, value);
+        });
+        console.log(doc_path_to, "->", path);
+        const data = typeof option.create === "function" ? option.create(document) : document.data()!;
+        if (!data) { return null; }
+        return db.doc(path).set(data);
+      });
+    }
+    if (!option.write && option.update) {
+      procs.update.push((document, context) => {
+        let path = doc_path_to;
+        _.each(context.params, (value, key) => {
+          path = path.replace(`{${key}}`, value);
+        });
+        console.log(doc_path_to, "->", path);
+        const data = typeof option.update === "function" ? option.update(document) : document.after.data()!;
+        if (!data) { return null; } 
+        return db.doc(path).set(data);
+      });
+    }
+    if (option.delete) {
+      procs.delete.push((document, context) => {
+        let path = doc_path_to;
+        _.each(context.params, (value, key) => {
+          path = path.replace(`{${key}}`, value);
+        });
+        console.log(doc_path_to, "->", path);
+        return db.doc(path).delete();
+      });
+    }
+  });
 
   const funcs: {
     write?: functions.CloudFunction<functions.Change<functions.firestore.DocumentSnapshot>>;
@@ -117,48 +182,24 @@ export function synchronizer(
     update?: functions.CloudFunction<functions.Change<functions.firestore.QueryDocumentSnapshot>>;
     delete?: functions.CloudFunction<functions.firestore.QueryDocumentSnapshot>;
   } = {};
-
-  if (option.write && !option.create && !option.update) {
-    funcs.write = functions.firestore.document(doc_path_from).onWrite((document, context) => {
-      let path = doc_path_to;
-      _.each(context.params, (value, key) => {
-        path = path.replace(`{${key}}`, value);
-      });
-      console.log(doc_path_to, "->", path);
-      const data = typeof option.write === "function" ? option.write(document) : document.after.data()!;
-      return db.doc(path).set(data);
+  if (procs.write.length > 0) {
+    funcs.write = functionBuilder.document(doc_path_from).onWrite((document, context) => {
+      procs.write.forEach(handler => handler(document, context));
     });
   }
-  if (!option.write && option.create) {
-    funcs.create = functions.firestore.document(doc_path_from).onCreate((document, context) => {
-      let path = doc_path_to;
-      _.each(context.params, (value, key) => {
-        path = path.replace(`{${key}}`, value);
-      });
-      console.log(doc_path_to, "->", path);
-      const data = typeof option.create === "function" ? option.create(document) : document.data()!;
-      return db.doc(path).set(data);
+  if (procs.create.length > 0) {
+    funcs.create = functionBuilder.document(doc_path_from).onCreate((document, context) => {
+      procs.create.forEach(handler => handler(document, context));
     });
   }
-  if (!option.write && option.update) {
-    funcs.update = functions.firestore.document(doc_path_from).onUpdate((document, context) => {
-      let path = doc_path_to;
-      _.each(context.params, (value, key) => {
-        path = path.replace(`{${key}}`, value);
-      });
-      console.log(doc_path_to, "->", path);
-      const data = typeof option.update === "function" ? option.update(document) : document.after.data()!;
-      return db.doc(path).set(data);
+  if (procs.update.length > 0) {
+    funcs.update = functionBuilder.document(doc_path_from).onUpdate((document, context) => {
+      procs.update.forEach(handler => handler(document, context));
     });
   }
-  if (option.delete) {
-    funcs.delete = functions.firestore.document(doc_path_from).onDelete((document, context) => {
-      let path = doc_path_to;
-      _.each(context.params, (value, key) => {
-        path = path.replace(`{${key}}`, value);
-      });
-      console.log(doc_path_to, "->", path);
-      return db.doc(path).delete();
+  if (procs.delete.length > 0) {
+    funcs.delete = functionBuilder.document(doc_path_from).onDelete((document, context) => {
+      procs.delete.forEach(handler => handler(document, context));
     });
   }
   return funcs;

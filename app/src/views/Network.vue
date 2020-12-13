@@ -56,37 +56,21 @@
             g.linker(v-if="state.action === 'link_from' && selected_node && anchored_point")
 
 
-      .node-panel(
+      NodeToolBox(
         v-if="selected_node"
+        :node="selected_node"
+        :state="state"
         :style="{ left: `${selected_node.x - 5 + offset.field.x}px`, top: `${selected_node.y - 5 + offset.field.y}px` }"
+        @tbNodeAction="receiveTbNodeAction"
       )
-        v-btn(small icon tile
-          @click="start_linking($event, selected_node.id)"
-          :color="state.action === 'link_from' ? 'info' : 'grey'"
-          dark
-          title="ここからリンク"
-        )
-          v-icon(
-          dark
-          ) link
-        v-btn(small icon tile
-          color="red"
-          @click="delete_node(selected_node)"
-          title="削除"
-        )
-          v-icon delete
 
-      .link-panel(
+      LinkToolBox(
         v-if="selected_link && secondary_data.link_binds[selected_link.id]"
+        :link="selected_link"
+        :state="state"
         :style="{ left: `${secondary_data.link_binds[selected_link.id].center.x + offset.field.x}px`, top: `${secondary_data.link_binds[selected_link.id].center.y + offset.field.y}px` }"
+        @tbLinkAction="receiveTbLinkAction"
       )
-        v-btn(small icon tile
-          color="red"
-          @click="delete_link(selected_link, true)"
-          title="削除"
-        )
-          v-icon delete
-
 
   .right_pane
     h4 I/O
@@ -99,9 +83,9 @@
         v-btn(x-small :disabled="!savable" :loading="state.working === 'loading'" @click="load()")
           v-icon(small) cloud_download
           | Load
-    h4 Edit
     .panel
       .subpanel
+        h4 Edit
         v-btn(x-small @click="add_new_node()" :disabled="state.lock_on")
           v-icon(small) add
           | New Node
@@ -115,57 +99,14 @@
         v-btn(x-small @click="showImporterRef = true")
           | Import
       //- v-slider(v-model="field_zoom_level" label="Field Zoom" :min="-4" :max="4" step="1" :messages="`${field_zoom_level}`")
-      .subpanel
-        v-text-field(v-model="netdata.title" label="Graph Title")
-      .subpanel
-        v-select(
-          v-model="netdata.type" label="Network Type"
-          :items="net_type_item"
-          :readonly="!changable_net_type"
-        )
+    NodeEditor(v-if="selected_node" :node="selected_node")
+    LinkEditor(v-else-if="selected_link"
+      :link="selected_link" :appearance="netdata.link_appearance[selected_link.id]"
+      @update_link="update_link(selected_link.id)"
+    )
+    NetEditor(v-else :net="netdata" :changable_net_type="changable_net_type")
 
-      .subpanel(v-if="selected_node")
-        .line
-          .name Selected Node
-          .value {{ selected_node.id }}
-        v-textarea(v-model="selected_node.title" label="Node Title")
-
-      .subpanel(v-if="selected_link")
-        .line
-          .name Selected Link
-          .value {{ selected_link.id }}
-        v-text-field(v-model="netdata.link_appearance[selected_link.id].title" label="Link Title")
-        h5 Type: {{ netdata.link_appearance[selected_link.id].arrow.type }}
-        v-btn-toggle(v-model="netdata.link_appearance[selected_link.id].arrow.type" mandatory dense tile @change="update_link(selected_link.id)")
-          v-btn(light small text value="direct")
-            v-icon arrow_forward
-          v-btn(light small text value="parallel")
-            v-icon subdirectory_arrow_right
-
-        
-    h4 Internal State
-    .panel.status
-      .line
-        .name Action Mode
-        .value {{ state.action }}
-      .line
-        .name Resize Mode
-        .value ({{ state.resizing_vertical }}, {{ state.resizing_horizontal }})
-      .line
-        .name Over Entity
-        .value {{ state.over_entity || "(none)" }}
-      .line
-        .name Field Offset
-        .value {{ offset.field || "(none)" }}
-      .line
-        .name Cursor Offset
-        .value {{ offset.cursor || "(none)" }}
-      .line
-        .name Inner Offset
-        .value {{ offset.inner || "(none)" }}
-      .line
-        .name Snap To
-        .value {{ offset.snap || "(none)" }}
+    InternalState(:state="state" :offset="offset")
   
   TextImport(
     :network_type="netdata.type" :show="showImporterRef"
@@ -183,6 +124,12 @@ import * as N from "@/models/network";
 import SvgNode from "@/components/SvgNode.vue";
 import SvgArrow from "@/components/SvgArrow.vue";
 import TextImport from "@/components/NetworkTextImport.vue";
+import InternalState from "@/components/InternalState.vue";
+import NetEditor from "@/components/NetEditor.vue";
+import NodeEditor from "@/components/NodeEditor.vue";
+import LinkEditor from "@/components/LinkEditor.vue";
+import NodeToolBox from "@/components/NodeToolBox.vue";
+import LinkToolBox from "@/components/LinkToolBox.vue";
 import anime from 'animejs'
 import * as Auth from "@/models/auth";
 import * as G from "@/models/geo";
@@ -199,6 +146,8 @@ type NetData = {
   link_appearance: N.Network.LinkAppearanceMap;
 };
 
+type Entity =  N.Network.Entity;
+
 
 function useImporter() {
   const showImporterRef = ref(false);
@@ -207,10 +156,6 @@ function useImporter() {
   };
 }
 
-type Entity = {
-  type: "Node" | "Link";
-  id: string;
-};
 
 
 const nodeMinimum = {
@@ -221,7 +166,7 @@ const nodeMinimum = {
 
 export default defineComponent({
   components: {
-    SvgNode, SvgArrow, TextImport,
+    SvgNode, SvgArrow, TextImport, InternalState, NetEditor, NodeEditor, LinkEditor, NodeToolBox, LinkToolBox,
   },
   props: {
     auth_state: {
@@ -242,17 +187,7 @@ export default defineComponent({
     const svgRef = ref(null);
     const editor = N.Network.useObjectEditor();
 
-    const state: {
-      action: N.Network.ActionState;
-      resizing_horizontal: "w" | "e" | null;
-      resizing_vertical: "n" | "s" | null;
-      snap_on: boolean;
-      lock_on: boolean;
-      selected_entity: Entity | null;
-      over_entity: Entity | null;
-      working: "saving" | "loading" | "idling";
-      animating: boolean;
-    } = reactive({
+    const state: N.Network.InternalState = reactive({
       action: "select_field",
       resizing_horizontal: null,
       resizing_vertical: null,
@@ -277,7 +212,7 @@ export default defineComponent({
     });
 
     const net: Ref<N.Network.Network | null> = ref(null);
-    const netdata: NetData = reactive({
+    const netdata: N.Network.NetData = reactive({
       title: "",
       type: "UD",
       nodes: [],
@@ -328,25 +263,7 @@ export default defineComponent({
       linkable_nodes: {},
     });
 
-    const offset: {
-      /**
-       * マウスカーソルの現在位置
-       */
-      cursor: G.Point | null;
-      /**
-       * ノードの内部座標系におけるオフセット値
-       * = ノードの原点から見たオフセット位置の座標
-       * リサイズ・移動に使う
-       */
-      inner: G.Point | null;
-      /**
-       * フィールドのオフセット値
-       * = SVG座標系の原点から見た「現在のビューポートの原点に対応する位置」の座標
-       */
-      field: G.Point;
-
-      snap: { x: number | null, y: number | null } | null;
-    } = reactive({
+    const offset: N.Network.OffsetGroup = reactive({
       cursor: null,
       inner: null,
       field: { x: 0, y: 0 },
@@ -397,12 +314,14 @@ export default defineComponent({
 
     const add_new_node = (arg: any = {}) => {
       const n = netdata.nodes.length;
-      netdata.nodes.push(N.Network.spawnNode({
+      const node = N.Network.spawnNode({
         ...arg,
         x: (n > 0 ? netdata.nodes[n-1].x : 0) + 10,
         y: (n > 0 ? netdata.nodes[n-1].y : 0) + 10,
-      }));
-      flush_graph()
+      });
+      netdata.nodes.push(node);
+      flush_graph();
+      return node;
     }
 
     const set_node_status = (node_id: string) => {
@@ -443,10 +362,6 @@ export default defineComponent({
         netdata.link_map,
         reverse_link_map.value,
       );
-    }
-
-    const start_linking = (event: MouseEvent, node_id: string) => {
-      transition_state(event, "click_button_link", { id: node_id, type: "Node" })
     }
 
     const set_link_from_selected = (to: Node) => {
@@ -1001,8 +916,6 @@ export default defineComponent({
       // reachable_map,
       changable_net_type: computed(() => N.Network.changable_type(netdata.link_map)),
 
-      net_type_item: computed(() => (["UD", "F", "D", "DA"] as const).map(type => ({ value: type, text: N.Network.typeName[type] }))),
-
       // methods
       add_new_node,
       ...handlers,
@@ -1021,7 +934,6 @@ export default defineComponent({
         secondary_data.link_binds = _.mapValues(link_dictionary, link => link_bind(link));
         flush_graph();
       },
-      start_linking,
       update_link,
       delete_link,
       delete_node,
@@ -1061,7 +973,36 @@ export default defineComponent({
         }
         state.working = "idling";
       },
-    };
+
+      receiveTbNodeAction: (payload: any) => {
+        const { event, action, node } = payload;
+        switch (action) {
+          case "link": {
+            transition_state(event, "click_button_link", { id: node.id, type: "Node" })
+            break;
+          }
+          case "add_node": {
+            const node = add_new_node();
+            set_link_from_selected(node);
+            break;
+          }
+          case "delete": {
+            delete_node(node);
+            break;
+          }
+        }
+      },
+
+      receiveTbLinkAction: (payload: any) => {
+        const { event, action, link } = payload;
+        switch (action) {
+          case "delete": {
+            delete_link(link, true);
+            break;
+          }
+        }
+      },
+};
   }
 });
 </script>
@@ -1109,18 +1050,6 @@ export default defineComponent({
     height 100%
     width 100%
     font-size 10px
-  .node-panel, .link-panel
-    position absolute
-    word-break keep-all
-    background-color white
-    white-space nowrap
-    opacity 1
-    transform-origin: top center;
-    transform scale(+1,-1)
-    border solid 1px #888
-    .v-btn
-      transform scale(+1,-1)
-      margin 1px
 
 .self
   &.move_field, &.move_node
@@ -1163,21 +1092,4 @@ export default defineComponent({
 .linker
   pointer-events none
 
-.panel.status
-  display flex
-  flex-direction column
-  .line
-    display flex
-    flex-direction row
-    width 100%
-    .name
-      text-align left
-      font-weight bold
-      flex-shrink 0
-      flex-grow 0
-    .value
-      overflow hidden
-      text-align right
-      flex-shrink 1
-      flex-grow 1
 </style>

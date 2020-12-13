@@ -10,9 +10,13 @@ g.node(
       @mouseenter.stop="mouseEnter($event)"
       @mouseleave.stop="mouseLeave($event)"
     )
-  g(transform="translate(4,12)")
-    text(v-for="(line,i) in format_svg_text_multiline(node.title)")
-      tspan(x="0" :dy="i * 12") {{ line }}
+  g
+    text(
+      v-for="(line,i) in format_svg_text_multiline(node.title)"
+      :x="node.width/2"
+      :y="(i+1) * 12"
+      :style="{ 'text-anchor': 'middle' }"
+    ) {{ line }}
 
   g.resizer(v-if="status.selected")
     rect.edge(v-for="rb in resizer_binds" :key="rb.resizeMode"
@@ -149,6 +153,7 @@ export default defineComponent({
     fill black
     user-select none
     pointer-events none
+    border 1px solid red
   &.reachable-from-selected .nodebody
     fill lightyellow
   &.reachable-to-selected .nodebody

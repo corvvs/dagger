@@ -16,16 +16,23 @@ db.settings({ timestampsInSnapshots: true })
 
 
 exports.datahooks = {
-  dag: {
-    ...FU.synchronizer(db, `user/{user_id}/dag/{dag_id}`, `user/{id}/dag_head/{id}`, {
-      write: change => _.omit(change.after.data(), "nodes", "links"),
-      delete: true,
-    }),
-  },
   net: {
-    ...FU.synchronizer(db, `user/{user_id}/net/{id}`, `user/{user_id}/net_head/{id}`, {
-      write: change => _.omit(change.after.data(), "nodes", "links", "links_appearance"),
-      delete: true,
+    ...FU.synchronizer(db, `user/{user_id}/net/{id}`, {
+      // 本体 -> 検索
+      [`user/{user_id}/net_head/{id}`]: {
+        write: change => _.omit(change.after.data(), "nodes", "links", "links_appearance"),
+        delete: true,
+      },
+      // 本体 -> グローバル検索
+      [`net_head/{user_id}_{id}`]: {
+        write: change => _.omit(change.after.data(), "nodes", "links", "links_appearance"),
+        delete: true,
+      },
+      // 本体 -> グローバル本体
+      [`net/{user_id}_{id}`]: {
+        write: change => change.after.data(),
+        delete: true,
+      },
     }),
   }
 };

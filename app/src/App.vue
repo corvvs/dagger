@@ -2,9 +2,6 @@
 v-app#app
   v-navigation-drawer(v-model="navState.drawer" :mini-variant.sync="navState.mini" app light stateless)
     v-list.pt-0(dense)
-      v-list-item(@click.stop="navState.mini = true; go('/f')")
-        v-list-item-icon
-          v-icon format_list_bulleted
       v-list-item(@click.stop="navState.mini = true; go('/net')")
         v-list-item-icon
           v-icon share
